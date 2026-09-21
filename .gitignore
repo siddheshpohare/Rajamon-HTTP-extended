@@ -1,0 +1,18 @@
+# Environment variables — never commit real values
+.env
+
+# Log files
+*.log
+
+# Compiled Go binaries
+/bin/
+
+# macOS metadata
+.DS_Store
+
+# Go build cache
+*.test
+*.out
+
+# Docker override files
+docker-compose.override.yml

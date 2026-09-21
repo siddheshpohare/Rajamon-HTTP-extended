@@ -1,0 +1,16 @@
+version: "3.9"
+
+# ============================================================
+# Rajomon-HTTP — Top-Level Orchestration
+#
+# Phase 1: Social Network benchmark app services only.
+#          No sidecar, gateway, or observability services yet.
+#
+# Later phases will add:
+#   Phase 2  — sidecar-compose-post
+#   Phase 4  — remaining sidecars + Prometheus + Grafana
+#   Phase 5  — Envoy gateway
+# ============================================================
+
+include:
+  - path: benchmark-app/docker-compose.yml

@@ -16,3 +16,6 @@
 
 # Docker override files
 docker-compose.override.yml
+
+# PDF documents — kept locally, not committed
+*.pdf

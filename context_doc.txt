@@ -1,0 +1,980 @@
+﻿--- PAGE 1 ---
+Rajomon-HTTP ΓÇö Project Context & Design Document
+A pre-build vision and planning reference ΓÇö COL724/COL7524 Advanced Computer
+Networks
+Suraj Raj (2026MCS2801) ┬╖ Siddhesh Pohare (2026MCS2257)
+Draft ΓÇö August 2026
+Contents
+1. Why This Project Exists 3
+1.1 The real-world problem . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+1.2 Project name . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+1.3 Scope ΓÇö which real-world stages this project touches . . . . . . . . . . . . . . . . . . . 3
+1.4 What must be dynamic / config-driven, with no advance knowledge . . . . . . . . . . 5
+2. System Actors & Components 6
+3. Cross-Cutting Requirement: T ransparent, Zero-Application-Code Integration 7
+3.1 What it is and why itΓÇÖs central . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+3.2 How itΓÇÖs implemented . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+3.3 What is and isnΓÇÖt covered by this guarantee . . . . . . . . . . . . . . . . . . . . . . . . 7
+3.4 Interview talking point . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+4. Critical Design Decisions 8
+4.1 Request Lifecycle / State T able . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+5. T echnology Stack ΓÇö F ull Justification 11
+5.1 Middleware / sidecar language . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+5.2 Gateway / reverse proxy . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+5.3 Benchmark application . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+5.4 Load generation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+5.5 Observability / metrics . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+5.6 Containerization / orchestration . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+6. Metrics & T elemetry Schema (planned ΓÇö not yet implemented) 15
+6.1 Planned Prometheus metric names and labels . . . . . . . . . . . . . . . . . . . . . . . 15
+6.2 Deliberate separations, and why they matter (interview framing) . . . . . . . . . . . . 15
+7. System Architecture 17
+7.1 ASCII architecture diagram . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+7.2 Key flows, arrow notation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+1
+--- PAGE 2 ---
+8. Core Logic ΓÇö The Admission Engine 19
+8.1 Determinism . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+8.2 Every distinct rule/case, pseudocode-style . . . . . . . . . . . . . . . . . . . . . . . . . 19
+8.3 The golden rule / safety default . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+8.4 Decision / verdict table . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+9. Project F older Structure (proposed / tentative) 21
+9.1 Key architectural separations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+10. Observability Dashboard Design (proposed / tentative) 23
+10.1 Planned panels . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+10.2 State-based behavior . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+11. Security Model & Threat Assumptions 24
+11.1 T rust assumptions (inherited, not solved) . . . . . . . . . . . . . . . . . . . . . . . . . 24
+11.2 What this means concretely . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24
+11.3 Interview talking point . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24
+12. Prior W ork Analysed 25
+13. Interview T alking Points 27
+Closing Note 28
+2
+--- PAGE 3 ---
+1. Why This Project Exists
+1.1 The real-world problem
+Modern backend systems are built as microservices : a single user request (search a hotel, post a
+payment, load a timeline) is broken into a chain of internal calls across many small, independently-
+deployed services. When any one service in that chain gets overloaded, the slowdown propagates
+backward through every service waiting on it ΓÇö wasting all the work already completed earlier in the
+request path, and dragging otherwise-healthy services down with it. This is cascading overload ,
+and it is one of the most common ways large backend systems degrade under real tra∩¼Çic spikes.
+Concrete, verified scale numbers (from Rajomon, NSDI ΓÇÖ25 ΓÇö the paper this project extends,
+verified directly against the paperΓÇÖs own text and o∩¼Çicial USENIX abstract):
+ΓÇó Evaluated at up to 140 CPU cores across CloudLab servers, under bursts up to 30,000
+requests/second .
+ΓÇó Prior state-of-the-art overload-control baselines (T opF ull) take up to 10 seconds to react
+to a load spike, and multiple baselines take several seconds to recover after one ΓÇö versus
+RajomonΓÇÖs sub-second reaction and recovery .
+ΓÇó RajomonΓÇÖs own headline result: 78% lower tail latency , 45% higher goodput than prior
+state-of-the-art overload control, in high-load scenarios.
+The gap this project targets: RajomonΓÇÖs entire mechanism ΓÇö a decentralized, market-like
+system where requests carry ΓÇ£tokensΓÇ¥ and services set congestion-based ΓÇ£prices,ΓÇ¥ with no central
+coordinator ΓÇö is implemented and evaluated specifical ly for gRPC , using gRPCΓÇÖs native interceptor
+and metadata system to attach this information to every call. REST/HTTP ΓÇö which remains the
+default way most public-facing APIs and a large share of internal service boundaries communicate,
+and the protocol spoken by the API gateways (Envoy , NGINX) that front a huge share of real
+production tra∩¼Çic ΓÇö has no equivalent built-in mechanism. There is currently no working, evaluated
+version of RajomonΓÇÖs mechanism for REST/HTTP systems. This project builds and evaluates one.
+1.2 Project name
+W orking title: Rajomon-HTTP . The name is deliberately a portmanteau, following the same
+convention as the paperΓÇÖs own naming of its point of comparison (ΓÇ£T opF ullΓÇ¥ as a name for its
+own mechanism) ΓÇö it keeps ΓÇ£RajomonΓÇ¥ for direct lineage/attribution to the base mechanism being
+extended, and appends ΓÇ£HTTPΓÇ¥ to name the one axis being changed. This is a working title ,
+explicitly open to revision as the project develops; nothing about the technical design depends on
+the name.
+1.3 Scope ΓÇö which real-world stages this project touches
+Rajomon-HTTP is a research/systems extension project, not a production system, so ΓÇ£scopeΓÇ¥ here
+means: which parts of a full overload-control deployment does this project actually build and
+evaluate, versus reason about but not implement.
+3
+--- PAGE 4 ---
+Stage of a full overload-control
+deployment Status Why
+T oken/price mechanism design
+(protocol-level)FULL This is the core contribution ΓÇö
+designing how tokens/prices
+are represented and propagate
+over HTTP instead of gRPC
+metadata.
+Middleware/sidecar
+implementationFULL A working sidecar that
+reads/writes the token and
+price headers and makes the
+admission decision, deployed
+in front of each service.
+Benchmark deployment
+(DeathStarBench Social
+Network)CORE Deployed and run locally via
+Docker Compose as the
+evaluation target; not a
+from-scratch benchmark app
+ΓÇö we use the existing
+open-source app as-is.
+Load generation and
+measurementCORE wrk2-driven bursty load tests,
+comparing baseline
+vs. Rajomon-HTTP on tail
+latency and success rate.
+Header-survival validation
+through a real gatewayCORE Specifically testing whether
+the custom headers survive an
+Envoy/NGINX hop ΓÇö this is
+the empirical test of the
+projectΓÇÖs central risk.
+Multi-application generality
+(beyond one benchmark app)P AR TIAL W e evaluate on one benchmark
+app (Social Network); we do
+not claim the result generalizes
+to every REST system, and we
+say so explicitly in the report.
+Production-grade security
+hardening (auth, header
+spoofing defense)OUT OF SCOPE The base paper itself assumes
+trusted clients and does not
+solve this; hardening against a
+malicious client is a stated
+open problem in both the
+original paper and our
+extension, not something this
+project attempts to solve.
+Kubernetes/service-mesh-
+native deployment (Istio, etc.)OUT OF SCOPE Docker Compose is su∩¼Çicient
+for a two-person, one-semester
+evaluation; a full service-mesh
+integration is a separate,
+larger engineering effort.
+4
+--- PAGE 5 ---
+Stage of a full overload-control
+deployment Status Why
+Dynamic/non-deterministic
+call-graph supportOUT OF SCOPE The base paper itself states
+this as a limitation (Section 6,
+Dynamic Service Graphs);
+inherited, not solved, by this
+extension.
+1.4 What must be dynamic / config-driven, with no advance knowledge
+ΓÇó Per-service price computation must not be hardcoded. The system has no advance
+knowledge of which service will become congested, when, or by how much. Price must be
+computed live, per service, from that serviceΓÇÖs own local congestion signal at request time ΓÇö
+never a fixed or pre-scripted value.
+ΓÇó The set of services and their call graph must not be assumed fixed at build time.
+The middleware/sidecar logic must work by intercepting whatever request/response passes
+through it, without embedding assumptions about a specific fixed topology , so it can be
+pointed at any service in the benchmark app without per-service custom code.
+ΓÇó T oken budgets must be a request-time parameter, not a constant baked into the
+client. The evaluation harness must be able to vary starting token budgets without code
+changes, since sensitivity to this parameter is part of what an evaluation would want to
+explore.
+5
+--- PAGE 6 ---
+2. System Actors & Components
+(Adapted from a traditional ΓÇ£user rolesΓÇ¥ section ΓÇö Rajomon-HTTP has no human end users or
+accounts; its ΓÇ£actorsΓÇ¥ are the system components that participate in every request.)
+Component Role in the system What it doesWhat it explicitly
+does NOT do
+Client Originates each
+requestAttaches an initial
+token budget; reads
+returned price
+information from
+responses to inform
+future requestsDoes not make
+admission decisions
+itself in the base
+design; does not have
+any privileged access
+to service internals
+Gateway (Envoy or
+NGINX)Entry point / reverse
+proxyRoutes incoming
+requests to the correct
+service; is the first
+(and riskiest) hop the
+custom token header
+must surviveDoes not compute
+prices; does not run
+Rajomon-HTTPΓÇÖs
+admission logic itself
+(that lives in the
+sidecars)
+Service One microservice in
+the benchmark app
+(e.g. a post-storage or
+user-timeline service)Does the actual
+application work
+(unmodified ΓÇö no
+Rajomon-specific code
+inside the service
+itself)Does not know
+Rajomon-HTTP
+exists; all
+overload-control logic
+is external to it, by
+design
+Sidecar (our own
+middleware)Sits in front of every
+serviceReads the incoming
+token header;
+computes/reads that
+serviceΓÇÖs current local
+price; decides forward
+vs. reject (HTTP 503);
+writes the price header
+onto the outgoing
+responseDoes not modify the
+serviceΓÇÖs actual
+request/response
+payload; does not talk
+to any other sidecar
+directly (no
+peer-to-peer
+coordination ΓÇö all
+coordination is via the
+request/response path
+itself)
+T wo-person-integrity / separation-of-duties note: not applicable in the traditional sense (no
+human approval workflow), but there is an analogous design boundary worth stating explicitly:
+the sidecar must never be able to see or alter the request/response body , only headers.
+This keeps the overload-control layer strictly separated from application logic ΓÇö mirroring how the
+original paperΓÇÖs gRPC interceptor never touches the actual RPC payload either.
+6
+--- PAGE 7 ---
+3. Cross-Cutting Requirement: T ransparent, Zero-Application-
+Code Integration
+3.1 What it is and why itΓÇÖs central
+The single non-negotiable property carried over from the base paper is that overload control must
+be completely transparent to the application code it protects . The original Rajomon
+works purely as a gRPC interceptor ΓÇö the Hotel Reservation and Social Network application code
+inside each service is never modified. Rajomon-HTTP must preserve this property for REST: the
+benchmark applicationΓÇÖs own code is never touched. All logic lives in the sidecar, sitting
+outside the service.
+3.2 How itΓÇÖs implemented
+ΓÇó The sidecar is deployed as a separate container/process in front of each service (see Section
+8, System Architecture), not as a code change inside the service.
+ΓÇó Communication between the sidecar and the service it protects happens over localhost HTTP ,
+with the sidecar acting as a local reverse proxy ΓÇö the service never knows the sidecar exists.
+ΓÇó T oggling Rajomon-HTTP on/off is a deployment-level decision (whether the sidecar con-
+tainer is present in front of a given service), not a code-level flag inside the application.
+3.3 What is and isnΓÇÖt covered by this guarantee
+ΓÇó Covered: the benchmark applicationΓÇÖs business logic (Social NetworkΓÇÖs post/timeline/user
+services) ΓÇö zero modification.
+ΓÇó Not covered: the gateway configuration itself. Envoy/NGINX does need configuration
+changes (routing rules, and potentially explicit allow-listing of the custom headers) ΓÇö this
+is infrastructure configuration, not application code, but itΓÇÖs worth being precise that ΓÇ£zero-
+touchΓÇ¥ applies to the application , not to every piece of infrastructure in the path.
+3.4 Interview talking point
+ΓÇ£The design goal we inherited from the base paper is that overload control has to be something
+you can bolt onto an existing system without rewriting it ΓÇö thatΓÇÖs what makes an idea like this
+practical ly adoptable, not just a research toy. W e kept that property in our REST port by keeping
+every piece of Rajomon-HTTPΓÇÖs logic in an external sidecar container, so the actual benchmark
+application code is never touched. The tradeoff is that infrastructure config ΓÇö the gateway ΓÇö does
+need to cooperate, which is exactly the risk we test for directly in our evaluation. ΓÇ¥
+7
+--- PAGE 8 ---
+4. Critical Design Decisions
+# Decision Why (tied to a real constraint)
+1 Represent tokens and prices as
+custom HTTP headers
+(X-Rajomon-Tokens ,
+X-Rajomon-Price ), not a
+request body fieldHeaders are the only
+HTTP-native mechanism that
+doesnΓÇÖt require touching the
+actual application payload ΓÇö
+preserving the zero-touch
+guarantee (Section 3). A body
+field would require the service
+to parse and re-emit
+Rajomon-specific fields,
+breaking transparency .
+2 T okens travel forward on the
+request; prices travel back on
+the responseThis directly mirrors the base
+paperΓÇÖs own mechanism
+(Section 3 of Rajomon),
+verified against the actual
+paper text and Figure 2 ΓÇö
+tokens represent ΓÇ£what this
+request can still affordΓÇ¥
+(needed by services further
+downstream), prices represent
+ΓÇ£how congested am IΓÇ¥ (needed
+by the sender for its next
+request).
+3 Sidecar rejects with HTTP
+503 , never a silent drop503 is the standard HTTP
+status for ΓÇ£server choosing not
+to process due to
+unavailability/overloadΓÇ¥ ΓÇö
+using the correct status code
+lets any client-side
+retry/backoff logic behave
+correctly , instead of looking
+like an unrelated failure.
+4 Sidecar is a separate
+container , not an in-process
+library linked into the servicePreserves the
+zero-application-code-change
+property (Section 3); also
+makes it trivial to add/remove
+Rajomon-HTTP from a given
+service purely at deployment
+time.
+8
+--- PAGE 9 ---
+# Decision Why (tied to a real constraint)
+5 Price computation is
+local-only ΓÇö a serviceΓÇÖs
+sidecar never queries another
+sidecar directlyPreserves the ΓÇ£decentralizedΓÇ¥
+property that is the base
+paperΓÇÖs core claim; a design
+that required sidecar-to-sidecar
+queries would reintroduce
+exactly the extra-round-trip
+cost the original mechanism is
+designed to avoid.
+6 Evaluation explicitly includes
+aheader-survival test
+through a real gateway , not
+just a direct service-to-service
+testThis is the single biggest risk
+unique to the REST/HTTP
+port (Section 1.1) ΓÇö a result
+that only tests
+service-to-service headers
+without a gateway in the loop
+would not actually validate the
+real-world deployment
+scenario.
+7 On an ambiguous/unexpected
+condition (e.g., missing token
+header on an incoming
+request), the sidecar fails
+open (forwards the request)
+rather than fails closed
+(rejects it)Overload control is a resilience
+mechanism; a bug or partial
+rollout should not itself
+become a new source of
+outages. F ailing open trades a
+small risk of un-throttled load
+for the much larger risk of a
+control-plane bug taking down
+otherwise-healthy tra∩¼Çic. This
+is a deliberate golden-rule
+default, not an oversight (see
+also Section 9.3).
+4.1 Request Lifecycle / State T able
+State T rigger Next state(s)
+RECEIVED Request arrives at a sidecar -> TOKEN_CHECKED
+TOKEN_CHECKED Sidecar compares attached
+tokens against local price-> FORWARDED (tokens >=
+price) or -> REJECTED_EARLY
+(tokens < price)
+FORWARDED Sidecar passes request to the
+actual service, with reduced
+token count-> SERVICE_PROCESSED
+SERVICE_PROCESSED Service completes its work
+normally (unaware of
+Rajomon-HTTP)-> RESPONSE_PRICED
+9
+--- PAGE 10 ---
+State T rigger Next state(s)
+RESPONSE_PRICED Sidecar attaches this serviceΓÇÖs
+current price to the outgoing
+response-> RETURNED
+REJECTED_EARLY Insu∩¼Çicient tokens at this hop (terminal ΓÇö HTTP 503
+returned immediately, no
+downstream work done)
+RETURNED Response (with price) sent
+back toward the client(terminal ΓÇö success path)
+HEADER_MISSING (fail-open
+path)Expected token/price header
+absent or malformed at a hop-> FORWARDED (fails open per
+Decision #7, not rejected)
+10
+--- PAGE 11 ---
+5. T echnology Stack ΓÇö F ull Justification
+5.1 Middleware / sidecar language
+Option Chosen? Why / why not
+Go Preferred default Matches the original Rajomon
+implementationΓÇÖs language
+(948 lines of Go, verified from
+the paper, Section 4) ΓÇö keeps
+our port directly comparable
+in spirit; GoΓÇÖs concurrency
+model (goroutines) is a natural
+fit for a lightweight per-request
+proxy .
+Python (F astAPI) Acceptable fallback F aster to prototype and debug
+for a two-person, time-boxed
+student project; higher
+per-request overhead than Go,
+which matters less at
+benchmark scale but is a real
+tradeoff worth stating plainly .
+Node.js Rejected No advantage over the above
+two for this specific task (a
+thin proxy); would add a third
+language to the stack for no
+benefit.
+5.2 Gateway / reverse proxy
+Option Chosen? Why / why not
+Envoy Preferred default Industry-standard, supports
+custom filters (W ASM), used
+as the default proxy in most
+modern service meshes ΓÇö
+testing against Envoy
+specifically gives the result
+more real-world relevance.
+NGINX (+ OpenResty/Lua) Acceptable alternative Simpler to configure for a
+small benchmark deployment;
+less ΓÇ£production infraΓÇ¥ signal
+than Envoy , but a reasonable
+lower-effort substitute if Envoy
+configuration proves too
+time-consuming.
+11
+--- PAGE 12 ---
+Option Chosen? Why / why not
+No gateway (direct
+service-to-service only)Rejected as sole test W ould skip exactly the risk
+this project exists to test
+(Decision #6, Section 4) ΓÇö a
+result without a real gateway
+in the loop doesnΓÇÖt validate
+the REST/HTTP deployment
+scenario.
+5.3 Benchmark application
+Option Chosen? Why / why not
+DeathStarBench ΓÇö Social
+NetworkChosen Open-source, widely used in
+networking/systems research
+(including cited by Rajomon
+itself), REST/HTTP-based,
+realistic multi-service topology
+ΓÇö using an established
+benchmark instead of a
+custom toy app makes results
+comparable to real research
+practice.
+Hotel Reservation (also
+DeathStarBench)Considered, not primary Also used by the base paper;
+Social Network chosen as
+primary for its richer fan-out
+pattern (relevant to
+interface-granularity concepts
+from Section 2 of the reference
+paper).
+Custom-built toy microservice
+appRejected W ould raise fair questions
+about whether results are
+realistic or just an artifact of a
+contrived setup.
+5.4 Load generation
+12
+--- PAGE 13 ---
+Option Chosen? Why / why not
+wrk2 Chosen Specifically designed to
+generate load at a constant
+target rate even under latency
+degradation (unlike plain wrk
+or ab, which can under-report
+load during slowdowns) ΓÇö
+critical for accurately
+simulating a real overload
+spike.
+Locust Considered More Python-native and
+scriptable, but heavier-weight
+for this specific need; wrk2ΓÇÖs
+constant-rate guarantee is
+more important here than
+LocustΓÇÖs flexibility .
+5.5 Observability / metrics
+Option Chosen? Why / why not
+Prometheus + Grafana Chosen F ree, open-source,
+industry-standard; both run as
+local Docker containers with
+no external dependency ΓÇö fits
+the ΓÇ£everything runs on a
+laptop, no API keys, no cloud
+accountsΓÇ¥ constraint (see
+Section 8).
+Cloud-hosted APM (Datadog,
+New Relic)Rejected Requires accounts/API keys
+and network egress to a third
+party ΓÇö unnecessary
+dependency for a local,
+reproducible student
+evaluation.
+5.6 Containerization / orchestration
+Option Chosen? Why / why not
+Docker Compose Chosen Su∩¼Çicient for a fixed, small
+(~15-20 container) topology on
+a single laptop; the whole
+DeathStarBench Social
+Network app is designed to
+run this way out of the box.
+13
+--- PAGE 14 ---
+Option Chosen? Why / why not
+Kubernetes Rejected for this projectΓÇÖs
+scopeAdds real setup and
+operational overhead (cluster
+provisioning, Y AML
+complexity) disproportionate
+to a two-person, semester-long
+evaluation; would be the
+natural next step for a
+production-grade follow-up,
+not this project.
+14
+--- PAGE 15 ---
+6. Metrics & T elemetry Schema (planned ΓÇö not yet implemented)
+(Adapted from a traditional database schema ΓÇö there is no business database in this project; this
+section instead defines the planned shape of the metrics this project wil l col lect and compare. Marked
+explicitly as a plan, not a built artifact.)
+6.1 Planned Prometheus metric names and labels
+Metric name Type Labels Purpose
+rajomon_request_total Counter service ,outcome
+(forwarded /rejected_early /fail_open )Count of requests seen
+by each sidecar,
+broken down by what
+happened to them
+rajomon_tokens_remaining Histogram service Distribution of token
+counts remaining at
+each hop, to observe
+how quickly budgets
+deplete under load
+rajomon_price_current Gauge service Each serviceΓÇÖs live,
+currently-advertised
+price ΓÇö the key signal
+for observing price
+propagation over time
+request_latency_seconds Histogram service ,endpoint Standard per-service,
+per-endpoint latency
+distribution, used to
+compute p95/p99 tail
+latency
+request_outcome_total Counter endpoint ,
+http_statusEnd-to-end request
+outcomes (success /
+503 / other errors),
+used to compute
+goodput and success
+rate
+6.2 Deliberate separations, and why they matter (interview framing)
+ΓÇó rajomon_request_total (per-sidecar decision) is kept separate from request_outcome_total
+(end-to-end result). Why this separation matters: a request can be forwarded by every
+sidecar it passes through and still end up slow or erroring for a completely unrelated reason
+(e.g. an application bug). Keeping these separate lets us cleanly answer ΓÇ£did Rajomon-HTTP
+itself cause this outcome, or something else downstream?ΓÇ¥ ΓÇö exactly the kind of question a
+real postmortem would need to answer, and conflating the two would make the evaluationΓÇÖs
+causal claims weaker.
+ΓÇó rajomon_price_current is a gauge (current value only), not a log of every price
+change. Why: for this evaluationΓÇÖs purposes, the trend of the current price over time (scraped
+at a regular interval) is whatΓÇÖs needed to observe propagation behavior ΓÇö a full event log of
+15
+--- PAGE 16 ---
+every price update would be a reasonable future extension but is out of scope for a semester-
+length evaluation.
+16
+--- PAGE 17 ---
+7. System Architecture
+7.1 ASCII architecture diagram
++-----------------------------+
+| Client |
+| (wrk2 load generator, or |
+| a real user request) |
++--------------+---------------+
+| HTTP request
+| + X-Rajomon-Tokens: <n>
+v
++-----------------------------+
+| Gateway (Envoy / NGINX) |
+| - routes to target service |
+| - risk point: may strip |
+| unrecognized headers |
++--------------+---------------+
+|
++-------------------------+-------------------------+
+v v v
++-------------------+ +-------------------+ +-------------------+
+| Sidecar (Svc A) | | Sidecar (Svc B) | | Sidecar (Svc C) |
+| reads tokens |---->| reads tokens |---->| reads tokens |
+| checks price | | checks price | | checks price |
+| forward / 503 | | forward / 503 | | forward / 503 |
++---------+---------+ +---------+---------+ +---------+---------+
+| (localhost) | (localhost) | (localhost)
+v v v
++-------------------+ +-------------------+ +-------------------+
+| Service A | | Service B | | Service C |
+| (unmodified | | (unmodified | | (unmodified |
+| DeathStarBench | | DeathStarBench | | DeathStarBench |
+| application | | application | | application |
+| code) | | code) | | code) |
++-------------------+ +-------------------+ +-------------------+
+<----------------------- response + X-Rajomon-Price ----------------------
++-----------------------------+
+| Prometheus (scrapes all |
+| sidecars on an interval) |
++--------------+---------------+
+v
++-----------------------------+
+| Grafana |
+| (dashboards - Section 10) |
++-----------------------------+
+17
+--- PAGE 18 ---
+7.2 Key flows, arrow notation
+Normal (admitted) request flow: Client -> Gateway -> Sidecar A [tokens >= price:
+OK] -> Service A -> Sidecar A [attach price] -> Sidecar B [tokens >= price: OK]
+-> Service B -> ... -> Client (response + accumulated price info)
+Early-rejection flow (the whole point of the mechanism): Client -> Gateway ->
+Sidecar A [tokens < price: REJECT] -> Client (HTTP 503, immediately ΓÇö Service A
+and everything downstream never touched)
+Header-survival test flow (Section 1.3, our own evaluation-specific flow): Client
+-> Gateway (Envoy/NGINX, real config) -> Sidecar A [inspect: did X-Rajomon-Tokens
+arrive intact?] -> pass/fail logged directly
+18
+--- PAGE 19 ---
+8. Core Logic ΓÇö The Admission Engine
+8.1 Determinism
+The admission decision (forward vs. reject) is deterministic given its inputs ΓÇö tokens remaining
+and current local price ΓÇö in the sense that the same (tokens, price) pair always yields the same
+admission outcome. This matters for the same reason it matters in the base paper: a load-shedding
+mechanism whose behavior canΓÇÖt be reasoned about or reproduced is very hard to trust or debug in
+production. What is not deterministic, by design, is the price itself over time (itΓÇÖs a live function
+of real, changing load) and the token amount attached per request (randomized per Decision-
+derived design, mirroring the base paperΓÇÖs ΓÇ£randomized token spending,ΓÇ¥ Section 7, Slide 7 of the
+presentation) ΓÇö those are intentionally variable; the decision rule applied to them is not.
+8.2 Every distinct rule/case, pseudocode-style
+function on_incoming_request(request):
+tokens = read_header(request, "X-Rajomon-Tokens")
+price = get_local_price() # computed from this service's own live load
+if tokens is MISSING or MALFORMED:
+# Golden rule: fail OPEN, never fail closed (Decision #7, Section 4)
+forward(request, attach_price=price)
+return
+if tokens >= price:
+remaining = tokens - price
+set_header(request, "X-Rajomon-Tokens", remaining)
+forward(request)
+# on the way back:
+set_header(response, "X-Rajomon-Price", price)
+return response
+else: # tokens < price
+return HTTP_503(reason="insufficient tokens for current price")
+function get_local_price():
+congestion_signal = observe_local_load() # e.g. queue depth / recent latency
+price = price_function(congestion_signal) # monotonically increasing in congestion
+return price
+8.3 The golden rule / safety default
+When in doubt, let the request through. Any ambiguous, malformed, or missing-header
+situation resolves to fail-open (forward the request as if Rajomon-HTTP werenΓÇÖt present), never
+fail-closed. A bug in the overload-control layer must never become a new outage. This is stated
+once here and is the single most important safety property of the whole system ΓÇö everything else
+is an optimization on top of this default.
+8.4 Decision / verdict table
+19
+--- PAGE 20 ---
+T okens vs. PriceHeader present &
+valid? V erdictDownstream service
+touched?
+tokens >= price Y es FORWARD Y es
+tokens < price Y es REJECT (503) No
+ΓÇö No / malformed FORWARD
+(fail-open)Y es
+N/A ΓÇö gateway
+stripped header
+entirelyN/A FORWARD
+(fail-open) , but
+flagged in the
+header-survival test as
+a mechanism failureY es (mechanism
+silently inactive ΓÇö
+this is exactly the
+failure mode Section
+1.3ΓÇÖs evaluation step
+exists to detect)
+20
+--- PAGE 21 ---
+9. Project F older Structure (proposed / tentative)
+(Explicitly tentative ΓÇö this is a planning proposal to guide initial setup, not a committed final
+layout. Expected to change as implementation proceeds.)
+rajomon-http/
+|-- sidecar/ # the core middleware - our main contribution
+| |-- main.go # entrypoint: starts the local reverse-proxy sidecar
+| |-- admission.go # the admission engine (Section 8 logic)
+| |-- pricing.go # local price computation from congestion signal
+| |-- headers.go # X-Rajomon-Tokens / X-Rajomon-Price parsing + writing
+| `-- metrics.go # Prometheus metric registration/export (Section 6)
+|
+|-- benchmark-app/ # DeathStarBench Social Network, run as-is (not our code)
+| `-- docker-compose.yml # spins up the full benchmark app locally
+|
+|-- gateway-config/
+| |-- envoy.yaml # Envoy config for header-survival test
+| `-- nginx.conf # NGINX alternative config
+|
+|-- load-tests/
+| |-- baseline-spike.lua # wrk2 script: no-Rajomon baseline load spike
+| |-- rajomon-spike.lua # wrk2 script: same spike, with sidecars active
+| `-- header-survival-check.sh # does the header survive the gateway?
+|
+|-- observability/
+| |-- prometheus.yml # scrape config, targets every sidecar
+| `-- grafana-dashboards/ # dashboard JSON exports (Section 10)
+|
+|-- docker-compose.yml # top-level compose: full stack, one command
+`-- README.md
+9.1 Key architectural separations
+Separation Why it matters
+sidecar/ is entirely separate from
+benchmark-app/Physically enforces the
+zero-application-code-change guarantee
+(Section 3) ΓÇö there is no folder, and therefore
+no code path, where Rajomon logic and
+application logic can accidentally intermix.
+load-tests/ distinguishes baseline-spike
+from rajomon-spike explicitly , as separate filesMakes the A/B comparison at the center of the
+evaluation (Section 1.3) structurally explicit in
+the repo itself, not just in a report ΓÇö anyone
+reading the repo can immediately see the two
+conditions being compared.
+21
+--- PAGE 22 ---
+Separation Why it matters
+gateway-config/ is its own top-level folder,
+not buried inside sidecar/The gateway is infrastructure the sidecar
+depends on but does not control ΓÇö keeping it
+separate reflects that itΓÇÖs a distinct component
+with its own real risk (header stripping), not an
+implementation detail of the sidecar.
+22
+--- PAGE 23 ---
+10. Observability Dashboard Design (proposed / tentative)
+(Adapted from ΓÇ£UI Design DecisionsΓÇ¥ ΓÇö this projectΓÇÖs only ΓÇ£interfaceΓÇ¥ is the Grafana dashboard
+used to read results during evaluation.)
+10.1 Planned panels
+Panel Shows Why this layout
+T ail latency over time
+(p50/p95/p99 lines)request_latency_seconds
+histogram, per endpointLine chart over time is the
+standard way to see a spike hit
+and recover ΓÇö directly
+supports the recovery-time
+claim being tested (mirrors
+paperΓÇÖs own Figure 4/6 style,
+Slide 12 of the presentation).
+Goodput vs. total
+throughput (stacked area)request_outcome_total , split
+by success vs. 503 vs. other
+errorDistinguishing ΓÇ£usefulΓÇ¥ from
+ΓÇ£totalΓÇ¥ tra∩¼Çic visually is the
+single clearest way to show
+whether Rajomon-HTTP is
+protecting useful work, not
+just relabeling failures.
+Live price per service
+(multi-line)rajomon_price_current Directly visualizes price
+propagation ΓÇö this is the
+panel most useful for
+explaining the mechanism live
+during a demo, not just
+reporting a final number.
+T oken depletion
+distribution (histogram)rajomon_tokens_remaining Shows whether requests are
+typically dying early in the
+chain (cheap rejection) or late
+(wasted work) ΓÇö a sanity
+check on whether the
+mechanism is behaving as
+intended.
+10.2 State-based behavior
+Before a load spike (warm-up phase): all panels should show low, flat, near-baseline values ΓÇö this is
+the ΓÇ£everything is fineΓÇ¥ reference state. During a spike: goodput panel should visibly separate from
+total throughput (503s rising); price panel should show a rise at the congested service specifically ,
+not uniformly everywhere. After the spike (recovery phase): the speed at which panels return
+to their warm-up baseline is the recovery-time measurement (Section 1.1ΓÇÖs headline claim, being
+tested at our scale).
+23
+--- PAGE 24 ---
+11. Security Model & Threat Assumptions
+(Adapted from ΓÇ£Authentication and SecurityΓÇ¥ ΓÇö there is no user authentication in this project; this
+section instead states the trust boundary the system operates within, inherited directly from the base
+paper.)
+11.1 T rust assumptions (inherited, not solved)
+The base paper explicitly assumes trusted clients (Section 6, ΓÇ£Malicious Clients,ΓÇ¥ verified directly
+against the paper text) ΓÇö it does not defend against a client deliberately lying about its token count
+or manipulating headers to gain an unfair admission advantage. Rajomon-HTTP inherits this
+same assumption and does not attempt to solve it. This is stated as an explicit, known
+limitation in Section 14 of the presentation deck and repeated here for the same reason: being
+upfront about it is more defensible than silently leaving it unaddressed.
+11.2 What this means concretely
+Threat Defended against? Note
+A well-behaved client sending
+genuine loadY es ΓÇö this is the mechanismΓÇÖs
+actual jobCore functionality
+A malicious client forging a
+high token count to bypass
+admission controlNo Inherited limitation from the
+base paper; would require
+cryptographic signing or a
+trusted-issuer model, explicitly
+out of scope
+A gateway silently stripping
+the Rajomon headersDetected, not prevented This is exactly what the
+header-survival test (Section
+1.3) is designed to catch and
+report on ΓÇö not to defend
+against automatically
+A compromised sidecar
+tampering with headersNo Same trust-boundary
+assumption as the base paper:
+sidecars themselves are
+assumed non-malicious
+infrastructure
+11.3 Interview talking point
+ΓÇ£W e were careful not to quietly inherit a limitation without naming it. The original paper assumes
+trusted clients and says so directly ΓÇö itΓÇÖs not solving a security problem, itΓÇÖs solving a perfor-
+mance/reliability problem under the assumption that clients aren ΓÇÖt adversarial. W e kept that same
+assumption explicit in our own limitations section rather than either pretending to solve it or leaving
+it unstated, because misrepresenting what a system does and doesn ΓÇÖt defend against is exactly the
+kind of gap that causes real production incidents. ΓÇ¥
+24
+--- PAGE 25 ---
+12. Prior W ork Analysed
+(Adapted from ΓÇ£Real-W orld Inputs AnalysedΓÇ¥ ΓÇö the inputs studied before designing this projectΓÇÖs
+extension are the papers below, not real-world data samples.)
+Source V enue / DateKey learning it contributed to
+this projectΓÇÖs design
+Rajomon (Xing et al.) NSDI ΓÇÖ25, Apr 2025 The base mechanism itself ΓÇö
+token/price propagation,
+decentralized-yet-coordinated
+design, all core to Section 8ΓÇÖs
+admission engine. F ull paper
+text fetched and verified
+directly (not just
+abstract/search snippets)
+before finalizing any factual
+claim used in this projectΓÇÖs
+materials.
+T opF ull SIGCOMM ΓÇÖ24 Confirmed as the closest prior
+alternative approach
+(centralized, RL-based,
+front-end-only) ΓÇö clarified
+exactly how Rajomon-HTTPΓÇÖs
+contribution differs from
+simply re-testing an existing
+centralized idea.
+Dagor / Breakwater /
+BreakwaterdCited within the Rajomon
+paperΓÇÖs own T able 1Established the fuller
+landscape of decentralized-but-
+uncoordinated approaches,
+verified cell-by-cell against the
+paperΓÇÖs actual T able 1 ΓÇö
+informs the
+Background/Related W ork
+framing (Slide 3 of the
+presentation).
+RetryGuard arXiv, Nov 2025 Checked specifically as a
+novelty/overlap risk ΓÇö
+confirmed it addresses a
+different problem (retry-storm
+cost) than transport-layer
+porting, clearing the way for
+this projectΓÇÖs REST/HTTP
+angle to be a genuinely
+distinct contribution.
+25
+--- PAGE 26 ---
+Source V enue / DateKey learning it contributed to
+this projectΓÇÖs design
+DeathStarBench Open-source benchmark suite Selected as the evaluation
+platform specifically because
+itΓÇÖs an established, realistic,
+REST/HTTP-capable
+microservice benchmark
+already used in networking
+research ΓÇö not built from
+scratch for this project.
+26
+--- PAGE 27 ---
+13. Interview T alking Points
+On the core idea:
+1.ΓÇ£The one-sentence version: every service prices itself based on its own live congestion, and
+that price rides back to the client on the response, so the whole system self-regulates without
+anyone needing a global view of it. ΓÇ¥
+2.ΓÇ£What makes this decentralized-and-coordinated combination hard is that those two properties
+usual ly trade off against each other ΓÇö decentralized systems typical ly lack the information to
+coordinate wel l, and coordinated systems typical ly need some central point with a global view.
+The trick is that the coordination information isn ΓÇÖt sent through a separate channel ΓÇö it rides
+on network tra∩¼Çic that was going to be sent anyway. ΓÇ¥
+On why this project (the extension) is more than a relabeling exercise:
+3.ΓÇ£gRPC gives you a built-in, guaranteed metadata channel for free. HTTP doesn ΓÇÖt ΓÇö the
+closest equivalent is a custom header, and headers aren ΓÇÖt guaranteed to survive the trip. Real
+gateways routinely strip headers they don ΓÇÖt recognize, which means a naive port could silently
+stop working and youΓÇÖd have no idea. ThatΓÇÖs a genuine systems problem, and itΓÇÖs specifical ly
+what our header-survival test is built to catch. ΓÇ¥
+4.ΓÇ£W e deliberately scoped our evaluation to include a real gateway in the loop, not just a direct
+service-to-service test ΓÇö because skipping that would mean we hadn ΓÇÖt actual ly tested the thing
+that makes this port risky in the first place. ΓÇ¥
+On architecture:
+5.ΓÇ£Every piece of our logic lives in an external sidecar container, never inside the benchmark
+application ΓÇÖs own code ΓÇö that was a hard requirement, because the whole value proposition of
+an overload-control layer is that you can add it to an existing system without rewriting it. ΓÇ¥
+6.ΓÇ£The sidecar only ever touches headers, never the request or response body ΓÇö thatΓÇÖs a deliberate
+boundary that keeps the overload-control layer strictly separate from application logic. ΓÇ¥
+On the admission logic:
+7.ΓÇ£The actual decision rule is dead simple and deterministic ΓÇö do the tokens on this request
+cover this serviceΓÇÖs current price? WhatΓÇÖs not simple, and not meant to be, is how that price
+itself is computed, because it has to reflect real, changing load. ΓÇ¥
+8.ΓÇ£Our golden rule is fail-open, not fail-closed. If something about the token/price headers is
+missing or malformed, we let the request through rather than reject it ΓÇö because a bug in a
+resilience layer should never become a new source of outages. ΓÇ¥
+On evaluation methodology:
+9.ΓÇ£W eΓÇÖre comparing four things: a no-control baseline, our middleware active, whether the
+headers actual ly survive a real gateway, and the resulting tail latency and success rate ΓÇö
+that last comparison is meaningless without the header-survival check, because if headers don ΓÇÖt
+survive, youΓÇÖre not actual ly testing the mechanism at al l. ΓÇ¥
+10. ΓÇ£If the header-survival test shows headers getting stripped, thatΓÇÖs not a failed project ΓÇö thatΓÇÖs
+a real, useful finding about exactly where this class of approach breaks down in practice, and
+thatΓÇÖs legitimate research output either way. ΓÇ¥
+27
+--- PAGE 28 ---
+On honesty about limitations:
+11. ΓÇ£W e inherited the base paperΓÇÖs trusted-clients assumption rather than either pretending to fix
+it or leaving it unstated. ItΓÇÖs not solving a security problem ΓÇö itΓÇÖs a resilience mechanism
+that assumes non-adversarial clients, and we say so explicitly. ΓÇ¥
+12. ΓÇ£W eΓÇÖre testing on one benchmark application, at a smal ler scale than the original paperΓÇÖs
+140-core cluster ΓÇö we don ΓÇÖt claim this generalizes to every REST system, and we say that
+directly in our own limitations section. ΓÇ¥
+On technology choices:
+13. ΓÇ£W e chose Go to match the original implementation ΓÇÖs language, specifical ly so our port is
+comparable in spirit and scale ΓÇö the original is 948 lines of Go, and thatΓÇÖs the rough scale
+weΓÇÖre targeting too, not a much bigger system. ΓÇ¥
+14. ΓÇ£W e picked wrk2 over plain load-testing tools specifical ly because it maintains a constant target
+request rate even as latency degrades ΓÇö a naive load generator under-reports load exactly
+during the overload conditions weΓÇÖre trying to study, which would quietly undermine the whole
+evaluation. ΓÇ¥
+15. ΓÇ£Every tool in our stack ΓÇö Docker Compose, Prometheus, Grafana, wrk2 ΓÇö runs local ly
+with no API keys and no cloud account dependency, deliberately, so the evaluation is ful ly
+reproducible on a normal laptop by anyone who wants to check our work. ΓÇ¥
+Closing Note
+This document is your complete pre-build reference for Rajomon-HTTP ΓÇö re-read it before every
+coding session, and before any interview where this project comes up. Every decision in here is
+written with a why , not just a what , on purpose: the goal is that you understand the reasoning
+well enough to defend it, extend it, or change it deliberately if a real constraint forces your hand
+during implementation ΓÇö not that youΓÇÖve memorized this document as a fixed script. Everything
+marked (planned) ,(proposed) , or (tentative) is exactly that ΓÇö expected to evolve once real code
+and real measurements exist. What should not change without a good reason are the decisions in
+Section 4 and the golden rule in Section 8.3 ΓÇö those are the load-bearing design commitments the
+rest of the project is built on.
+28
+

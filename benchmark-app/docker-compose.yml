@@ -1,12 +1,4 @@
 version: "3.9"
-
-# ============================================================
-# DeathStarBench — Social Network
-# Source: https://github.com/delimitrou/DeathStarBench
-# Copied verbatim from socialNetwork/docker-compose.yml
-# (Phase 1 requirement: no modifications allowed)
-# ============================================================
-
 services:
   social-graph-service:
     image: deathstarbench/social-network-microservices:latest

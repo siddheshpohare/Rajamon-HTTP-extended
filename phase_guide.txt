@@ -1,0 +1,703 @@
+﻿--- PAGE 1 ---
+Rajomon-HTTP ΓÇô Phase-by-Phase Development Guide
+Pairs with the Project Context & Design Document ΓÇô COL724/COL7524
+Suraj Raj (2026MCS2801) . Siddhesh Pohare (2026MCS2257)
+Draft ΓÇô August 2026
+Contents
+1. How to Use This Document 3
+1.1 Phase Index . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+2. How This Should Actually Be Built 4
+2.1 Core principle: never build on unverified ground . . . . . . . . . . . . . . . . . . . . . 4
+2.2 Git discipline . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+2.3 Infrastructure rule (holds for the whole project) . . . . . . . . . . . . . . . . . . . . . . 4
+2.4 Env var discipline . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+2.5 The phase-chat rule . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+2.6 What this guide adapted out, and why . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+Phase 1: Environment & Benchmark Baseline 6
+Phase Goal . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+Entry Conditions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+What to Build . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+Exit Conditions ΓÇô V erify Before Phase 2 . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+Phase 2: Sidecar Skeleton 8
+Phase Goal . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+Entry Conditions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+What to Build . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+Exit Conditions ΓÇô V erify Before Phase 3 . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+Phase 3: Admission Engine 10
+Phase Goal . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+Entry Conditions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+What to Build . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+Exit Conditions ΓÇô V erify Before Phase 4 . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+Phase 4: Fleet Rollout & Metrics 13
+Phase Goal . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+Entry Conditions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+What to Build . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+Exit Conditions ΓÇô V erify Before Phase 5 . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+1
+--- PAGE 2 ---
+Phase 5: Gateway & Header-Survival T est 15
+Phase Goal . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+Entry Conditions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+What to Build . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+Exit Conditions ΓÇô V erify Before Phase 6 . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16
+Phase 6: Evaluation Harness 17
+Phase Goal . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+Entry Conditions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+What to Build . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+Exit Conditions ΓÇô V erify Before Phase 7 . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+Phase 7: End-to-End V erification 19
+Phase Goal . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+Entry Conditions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+End-to-End Manual T est Script . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+Appendix 20
+A.1 First-Time Setup (in order) . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+A.2 External API Keys . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+A.3 Day-to-Day Dev Commands . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+A.4 F ull Commit Message Reference . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+2
+--- PAGE 3 ---
+1. How to Use This Document
+This guide pairs with RajomonHTTP_Context_Document.pdf . That document is the why
+and the what ; this document is the in what order and exactly how .
+Per-phase workflow:
+1. Read the Context Document in full, once, before starting Phase 1. Everything in this guide
+assumes that context.
+2. Open a new chat for each phase. Do not continue an old phaseΓÇÖs chat into the next phase ΓÇô
+a fresh chat forces you to re-state ground truth explicitly rather than silently carry forward
+assumptions.
+3. Upload both documents (Context Document + this guide) to the new chat.
+4. Say exactly: ΓÇ£I am starting Phase N. ΓÇ¥
+5. Claude reads that phaseΓÇÖs section below and builds exactly what is specified there ΓÇô nothing
+from later phases, nothing redesigned from earlier phases.
+6. Before ending the chat, confirm every item in that phaseΓÇÖs Exit Conditions checklist, then
+make the exact commit specified.
+1.1 Phase Index
+# Phase One-line focus
+1 Environment & Benchmark
+BaselineGet DeathStarBench Social
+Network running, unmodified,
+measurable
+2 Sidecar Skeleton A pass-through proxy in front
+of one service ΓÇô no admission
+logic yet
+3 Admission Engine The real token/price decision
+logic, on that one service
+4 Fleet Rollout & Metrics Sidecars in front of every
+service, Prometheus wired up
+5 Gateway & Header-Survival
+T estEnvoy in front of everything;
+empirically test the core risk
+6 Evaluation Harness wrk2 load tests + Grafana
+dashboards; baseline
+vs. Rajomon-HTTP
+7 End-to-End V erification F ull manual walkthrough of
+the whole system; project
+complete
+3
+--- PAGE 4 ---
+2. How This Should Actually Be Built
+This is not a tutorial. It is written the way an engineer keeps their own build notes: build one
+verifiable layer, prove it works, only then build the next layer on top of it. There is no deadline
+pressure here ΓÇô this project is for learning, not just completion, so questions along the way are
+expected and welcome, at any phase.
+2.1 Core principle: never build on unverified ground
+Every phase below has an Entry Condition (what must already be true and already verified)
+and an Exit Condition (a literal checklist you run and confirm before moving on). A bug caught
+the moment itΓÇÖs introduced costs minutes. The same bug caught three phases later ΓÇô after the
+admission engine, the metrics pipeline, and the load tests are all built on top of it ΓÇô costs hours,
+and itΓÇÖs often unclear which layer is actually at fault. Do not skip an exit-condition check because
+ΓÇ£itΓÇÖll probably work. ΓÇ¥
+2.2 Git discipline
+One commit per phase. Exact commit message format:
+[Phase N] <Phase Name> -- <one-line summary of what now works>
+Example: [Phase 3] Admission Engine -- token/price decision logic live on compose-post-service
+Do not squash multiple phases into one commit, and do not commit mid-phase with a message
+describing a different phaseΓÇÖs work.
+2.3 Infrastructure rule (holds for the whole project)
+Everything runs in Docker. Nothing is installed natively on the host , including Go itself,
+Envoy , Prometheus, or Grafana. If a phase needs a Go toolchain to build the sidecar, that build
+happens inside a Docker multi-stage build ( docker build ) or viadocker compose run , never via
+a locally-installed go binary . This guarantees the project is reproducible on either teammateΓÇÖs
+laptop without a ΓÇ£works on my machineΓÇ¥ gap, and it matches the projectΓÇÖs own stated evaluation-
+reproducibility goal (Context Document, Section 5.5-5.6).
+2.4 Env var discipline
+ΓÇó A committed .env.example file lists every environment variable the system uses, with a
+placeholder or safe default value and a one-line comment.
+ΓÇó An actual .env file (gitignored, never committed) holds real local values.
+ΓÇó Note specific to this project: unlike a typical web app, Rajomon-HTTP has no external
+API keys or user secrets to protect ΓÇô there is no third-party service being called. The env var
+discipline here exists for a different reason: it keeps tunable system parameters (base price,
+price scale factor, default token budget, listen ports) out of hardcoded source code, so they
+can be changed per-experiment without recompiling. T reat .env as experiment configuration,
+not secret storage, but keep the same discipline regardless.
+4
+--- PAGE 5 ---
+2.5 The phase-chat rule
+Each phaseΓÇÖs chat builds only what is specified for that phase. If, while building, you notice
+something that seems like it should be different in an earlier phaseΓÇÖs already-committed code, do
+not silently change it . Stop, state the concern explicitly (what you noticed, why it seems like a
+problem, what changing it would affect), and get a decision before touching already-verified code.
+Do not jump ahead and start building a later phaseΓÇÖs files early , even if it seems convenient in the
+moment ΓÇô later phases assume the exit conditions of every earlier phase are true, not ΓÇ£mostly true. ΓÇ¥
+2.6 What this guide adapted out, and why
+This template was originally written for a full-stack web application. Rajomon-HTTP is a sys-
+tems/networking research project with no end users, so the following concepts from a typical phase
+guide do not apply and are intentionally not separate phases here:
+ΓÇó User authentication / accounts / roles-based login ΓÇô there are no human end users
+of this system; the ΓÇ£actorsΓÇ¥ are Client, Gateway , Service, and Sidecar (Context Document,
+Section 2), not people with logins.
+ΓÇó A background job queue (e.g. Celery/Redis workers) ΓÇô the sidecar handles each
+request synchronously , inline, as a reverse proxy; there is no asynchronous task processing in
+this system.
+ΓÇó A custom frontend ΓÇô there is no hand-built UI. Its role is filled by Grafana dashboards,
+folded into Phase 6 below.
+ΓÇó Data ingestion pipelines ΓÇô the closest equivalent is deploying the benchmark application
+and generating synthetic load, which is covered in Phases 1 and 6.
+5
+--- PAGE 6 ---
+Phase 1: Environment & Benchmark Baseline
+Phase Goal
+At the end of this phase, DeathStarBenchΓÇÖs Social Network benchmark application runs, unmodified,
+entirely inside Docker Compose, on either teammateΓÇÖs laptop, with zero Rajomon-HTTP code
+involved yet. Y ou can send it a request and get a normal response. This phase produces the
+ground truth baseline every later phaseΓÇÖs results will be compared against. Nothing related to
+tokens, prices, or sidecars exists yet ΓÇô that is expected and correct at this stage.
+Entry Conditions
+ΓÇó Docker and Docker Compose are installed on the machine being used.
+ΓÇó The Context Document has been read in full.
+ΓÇó An empty git repository exists locally , with only a README.md and.gitignore .
+What to Build
+Repository scaffolding
+File to create What it must contain / do
+.gitignore Standard Go + Docker + .env ignores:.env ,
+*.log ,/bin/ ,.DS_Store
+.env.example See table in Section ΓÇ£ConfigΓÇ¥ below
+README.md Project name, one-line description, link to the
+Context Document, ΓÇ£see Phase Guide for
+setupΓÇ¥
+Benchmark application
+File to create What it must contain / do
+benchmark-app/docker-compose.yml Clones/vendors DeathStarBenchΓÇÖs Social
+Network docker-compose.yml as-is (per
+Context Document Section 5.3 ΓÇô this is an
+existing open-source app, not code we write).
+Before writing this file, first clone
+https://github.com/delimitrou/DeathStarBench
+and copy the exact
+socialNetwork/docker-compose.yml service
+definitions in, unmodified. Record the exact list
+of service names and their internal ports in
+benchmark-app/SERVICES.md (see next row) ΓÇô
+do not guess these from memory .
+6
+--- PAGE 7 ---
+File to create What it must contain / do
+benchmark-app/SERVICES.md A table of every service name and internal port
+found in the real DeathStarBench compose file,
+filled in by actually inspecting that file (not
+invented) ΓÇô this becomes the reference every
+later phaseΓÇÖs sidecar config is built against.
+T op-level orchestration
+File to create What it must contain / do
+docker-compose.yml (repo root) F or this phase: an include: or direct copy-in
+ofbenchmark-app/docker-compose.yml ΓÇÖs
+services only . Later phases will add sidecar,
+gateway , and observability services here.
+Config
+Env var Example / default value Purpose
+COMPOSE_PROJECT_NAME rajomon-http Keeps Docker
+container/network names
+consistent and namespaced
+SOCIAL_NETWORK_NGINX_PORT 8080 The port DeathStarBenchΓÇÖs
+own nginx front-end is exposed
+on, for direct baseline testing
+in this phase
+Exit Conditions ΓÇô V erify Before Phase 2
+Γûídocker compose up -d starts every Social Network service with no container in a crash-
+restart loop ( docker compose ps shows all Up).
+Γûícurl http://localhost:8080/ (or the appΓÇÖs documented entry endpoint) returns a normal
+HTTP response, not a connection error.
+Γûíbenchmark-app/SERVICES.md lists real service names and ports copied from the actual cloned
+repository , not placeholders.
+Γûídocker compose down cleanly stops everything with no orphaned containers.
+Γûí Commit made with message: [Phase 1] Environment & Benchmark Baseline -- Social
+Network app runs unmodified via Docker Compose
+7
+--- PAGE 8 ---
+Phase 2: Sidecar Skeleton
+Phase Goal
+At the end of this phase, a Rajomon-HTTP sidecar exists as its own small Go program, deployed in
+front of exactly one service (compose-post-service , the main write-path service the base paperΓÇÖs
+own evaluation centers on). The sidecar does nothing but transparently proxy every request through
+to the real service and back ΓÇô no token/price logic yet . This phase proves the plumbing (proxy
+pattern, Docker wiring, localhost routing) works before any real decision logic is added on top of
+it in Phase 3.
+Entry Conditions
+ΓÇó Phase 1 exit conditions all verified.
+ΓÇóbenchmark-app/SERVICES.md confirms the real internal port for compose-post-service .
+What to Build
+Sidecar core (Go)
+File to create What it must contain / do
+sidecar/main.go Starts an HTTP server on
+RAJOMON_LISTEN_ADDR . Registers three routes:
+GET /healthz (returns200 OK , plain text
+"ok" ),GET /metrics (Phase 2: returns 200 OK
+with a placeholder empty body ΓÇô real metrics
+arrive in Phase 4), and a catch-all /handler
+that reverse-proxies every other request to
+RAJOMON_UPSTREAM_ADDR unchanged (using
+GoΓÇÖs standard
+net/http/httputil.ReverseProxy ).
+sidecar/config.go Definestype SidecarConfig struct {
+ServiceName string; ListenAddr string;
+UpstreamAddr string } and a
+LoadConfigFromEnv() SidecarConfig
+function that reads RAJOMON_SERVICE_NAME ,
+RAJOMON_LISTEN_ADDR ,
+RAJOMON_UPSTREAM_ADDR from the
+environment, failing fast (log and exit non-zero)
+if any is missing.
+sidecar/go.mod Go module definition, module name
+rajomon-http/sidecar
+Docker
+8
+--- PAGE 9 ---
+File to create What it must contain / do
+sidecar/Dockerfile Multi-stage build: stage 1 golang:1.22 builds
+a static binary; stage 2 a minimal base image
+(gcr.io/distroless/static oralpine ) copies
+in only the compiled binary and runs it. No Go
+toolchain in the final image (Section 2.3 infra
+rule).
+Config
+Env varExample value (for the
+compose-post-service
+sidecar) Purpose
+RAJOMON_SERVICE_NAME compose-post-service Identifies this sidecar instance
+for logging/metrics
+RAJOMON_LISTEN_ADDR :9464 Port the sidecar itself listens
+on
+RAJOMON_UPSTREAM_ADDR compose-post-service:9090
+(real internal port, confirmed
+fromSERVICES.md )Where the sidecar forwards
+real tra∩¼Çic to
+Compose wiring
+File to edit What it must contain / do
+docker-compose.yml (repo root) Add one new service block:
+sidecar-compose-post , built from
+sidecar/Dockerfile , with the three env vars
+above, attached to the same Docker network as
+the benchmark app, so it can reach
+compose-post-service by container name.
+Exit Conditions ΓÇô V erify Before Phase 3
+Γûícurl http://localhost:8080/... (whatever the real compose-post endpoint path is, con-
+firmed against SERVICES.md ) sent directly to the real service, and the same request sent
+to the sidecarΓÇÖs port instead , return byte-for-byte identical response bodies and status
+codes.
+Γûídocker compose logs sidecar-compose-post shows a log line for every request that passes
+through it.
+Γûícurl http://localhost:9464/healthz returns200 OK .
+Γûí Commit made with message: [Phase 2] Sidecar Skeleton -- transparent pass-through
+proxy live in front of compose-post-service
+9
+--- PAGE 10 ---
+Phase 3: Admission Engine
+Phase Goal
+At the end of this phase, the sidecar in front of compose-post-service makes a real admission
+decision on every request ΓÇô forward or reject with 503 ΓÇô based on tokens attached to the request and
+a live, locally-computed price. This is the heart of the entire project (Context Document, Section
+8). It is still deployed on one service only; Phase 4 rolls this same logic out everywhere.
+Entry Conditions
+ΓÇó Phase 2 exit conditions all verified ΓÇô transparent pass-through is proven working before any
+decision logic is added on top.
+What to Build
+Admission logic (Go)
+File to create What it must contain / do
+sidecar/headers.go func ReadTokenHeader(r *http.Request)
+(tokens int, ok bool) ΓÇô parses the
+X-Rajomon-Tokens request header as an
+integer;ok=false if missing or not a valid
+integer.func WriteTokenHeader(r
+*http.Request, remaining int) ΓÇô sets
+X-Rajomon-Tokens on the outgoing (proxied)
+request.func WritePriceHeader(w
+http.ResponseWriter, price float64) ΓÇô
+setsX-Rajomon-Price on the response,
+formatted to 2 decimal places.
+sidecar/pricing.go type Metrics struct { InFlight int64 }
+(an atomic counter). func (m *Metrics)
+IncInFlight() /func (m *Metrics)
+DecInFlight() ΓÇô atomic increment/decrement,
+called at the start/end of every proxied request.
+func GetLocalPrice(cfg SidecarConfig, m
+*Metrics) float64 ΓÇô returns cfg.BasePrice
++ cfg.PriceScaleFactor *
+float64(atomic.LoadInt64(&m.InFlight)) .
+In-flight request count is used as the local
+congestion signal: a simple, real,
+well-established load signal (the same principle
+behind concurrency-based load-shedding
+libraries used in production systems), not
+something requiring deep OS-level
+introspection ΓÇô deliberately chosen to be
+buildable within this projectΓÇÖs scope.
+10
+--- PAGE 11 ---
+File to create What it must contain / do
+sidecar/admission.go type Verdict int with named constants
+Forward ,RejectInsufficientTokens ,
+ForwardFailOpen .func Decide(tokens int,
+tokensOK bool, price float64) Verdict ΓÇô
+implements exactly the decision table in Phase
+3.2 below.
+sidecar/admission_test.go Unit tests covering every row of the Decision
+T able below, using GoΓÇÖs standard testing
+package.
+Wire it into main.go
+The catch-all proxy handler from Phase 2 must now, before forwarding: read tokens ( headers.go ),
+get the current price ( pricing.go ), callDecide(...) (admission.go ), and branch: - Forward :
+subtract price from tokens, call WriteTokenHeader , proxy the request, then call WritePriceHeader
+on the response before itΓÇÖs returned to the caller. - RejectInsufficientTokens : respond immedi-
+ately with 503 Service Unavailable , plain-text body "rajomon-http: insufficient tokens
+for current price" ,never touching the upstream service. - ForwardFailOpen : proxy the re-
+quest exactly as in Phase 2 (no token accounting), but still call WritePriceHeader on the response.
+Pseudocode (orchestration, ties the above together)
+on every incoming request:
+metrics.IncInFlight()
+defer metrics.DecInFlight()
+tokens, ok = ReadTokenHeader(request)
+price = GetLocalPrice(config, metrics)
+verdict = Decide(tokens, ok, price)
+if verdict == RejectInsufficientTokens:
+respond 503 immediately
+return
+if verdict == Forward:
+WriteTokenHeader(request, tokens - price)
+proxy request to upstream
+WritePriceHeader(response, price)
+return response
+Decision T able (exact ΓÇô implement precisely as written)
+11
+--- PAGE 12 ---
+tokens present &
+valid? tokens vs. price V erdict Upstream touched?
+No ΓÇô ForwardFailOpen Y es
+Y es tokens >= price Forward Y es
+Y es tokens < price RejectInsufficientTokens No
+This is a direct, literal implementation of Context Document Section 8.4 ΓÇô do not add additional
+cases or thresholds not listed here.
+Config
+Env var Example value Purpose
+RAJOMON_BASE_PRICE 1.0 Minimum price this service
+ever charges, even at zero load
+RAJOMON_PRICE_SCALE_FACTOR 0.5 How steeply price rises per
+in-flight request
+Exit Conditions ΓÇô V erify Before Phase 4
+Γûígo test ./sidecar/... passes, covering all three Decision T able rows.
+Γûícurl -H "X-Rajomon-Tokens: 100" against a lightly-loaded sidecar returns the normal up-
+stream response, with an X-Rajomon-Price response header present.
+Γûícurl -H "X-Rajomon-Tokens: 0" against the same sidecar returns 503 with the exact body
+text specified above, and docker compose logs compose-post-service shows no new re-
+quest reached the real service for that call.
+Γûícurl with noX-Rajomon-Tokens header at all still succeeds normally (fail-open verified).
+Γûí Commit made with message: [Phase 3] Admission Engine -- token/price decision
+logic live on compose-post-service
+12
+--- PAGE 13 ---
+Phase 4: Fleet Rollout & Metrics
+Phase Goal
+At the end of this phase, every service in the Social Network app has its own sidecar running
+the same admission logic from Phase 3, each with independently-tunable price parameters, and
+Prometheus is scraping real metrics from all of them. Y ou can, for the first time, watch price
+propagate across multiple hops in a real fan-out request (e.g. a compose-post request that internally
+calls post-storage, user-timeline, and home-timeline services).
+Entry Conditions
+ΓÇó Phase 3 exit conditions all verified on compose-post-service specifically before this logic is
+trusted enough to copy to every other service.
+What to Build
+Metrics (Go)
+File to create What it must contain / do
+sidecar/metrics.go Registers four Prometheus metrics using the
+standard prometheus/client_golang library ,
+exactly matching Context Document Section
+6.1:rajomon_request_total (CounterVec ,
+labelsservice ,outcome with values
+forwarded /rejected_early /fail_open ),
+rajomon_tokens_remaining (HistogramVec ,
+labelservice ),rajomon_price_current
+(GaugeVec , labelservice ),
+request_latency_seconds (HistogramVec ,
+labelsservice ,endpoint ). Replaces the Phase
+2 placeholder /metrics handler with the real
+Prometheus HTTP handler
+(promhttp.Handler() ).
+Wire metrics into the request path
+main.go ΓÇÖs request handler (from Phase 3) must now record: rajomon_request_total incremented
+once per request with the correct outcome label on every branch; rajomon_tokens_remaining
+observed with the token count on every Forward verdict;rajomon_price_current set every time
+GetLocalPrice is called; request_latency_seconds observed around the full proxy round-trip.
+Compose wiring ΓÇô one sidecar per remaining service
+13
+--- PAGE 14 ---
+File to edit What it must contain / do
+docker-compose.yml (repo root) F or every service listed in
+benchmark-app/SERVICES.md other than
+compose-post-service (already added in
+Phase 2), add one sidecar service block
+following the exact same pattern as
+sidecar-compose-post : its own
+RAJOMON_SERVICE_NAME ,
+RAJOMON_LISTEN_ADDR (a unique port per
+sidecar), RAJOMON_UPSTREAM_ADDR (that
+serviceΓÇÖs real container:port), and its own
+RAJOMON_BASE_PRICE /
+RAJOMON_PRICE_SCALE_FACTOR (start every
+service at the same defaults from Phase 3
+unless thereΓÇÖs a specific reason to differ).
+Observability
+File to create What it must contain / do
+observability/prometheus.yml Ascrape_configs block with one target per
+sidecar (every sidecar-*:9464/metrics
+endpoint from the compose file above), scrape
+interval5s .
+docker-compose.yml (repo root, add services) Add prometheus (o∩¼Çicialprom/prometheus
+image, mounts
+observability/prometheus.yml , exposes port
+9090 ) andgrafana (o∩¼Çicialgrafana/grafana
+image, exposes port 3000 ).
+Exit Conditions ΓÇô V erify Before Phase 5
+Γûídocker compose ps shows one sidecar container per benchmark-app service, all Up.
+Γûí Prometheus UI ( http://localhost:9090/targets ) shows every sidecar target as UP, none
+DOWN .
+Γûí A query for rajomon_price_current in the Prometheus UI returns one time series per service.
+Γûí A single compose-post request (with a valid X-Rajomon-Tokens header) triggers visibly dif-
+ferentX-Rajomon-Price values from at least two different servicesΓÇÖ sidecars, confirming price
+is being computed independently per hop, not globally .
+Γûí Commit made with message: [Phase 4] Fleet Rollout & Metrics -- sidecars in
+front of every service, Prometheus scraping all targets
+14
+--- PAGE 15 ---
+Phase 5: Gateway & Header-Survival T est
+Phase Goal
+At the end of this phase, an Envoy gateway sits in front of the whole system, and the single
+biggest open risk in this entire project (Context Document, Sections 1.1, 4 Decision #6, and
+Slide 9 of the presentation) has been empirically tested and documented , either way: does
+X-Rajomon-Tokens actually survive a real gateway hop, under both a permissive and a deliberately
+hardened gateway configuration?
+Entry Conditions
+ΓÇó Phase 4 exit conditions all verified ΓÇô price propagation across hops must already be proven
+working service-to-service before adding a gateway hop in front of it.
+What to Build
+Gateway configs ΓÇô two variants, deliberately
+File to create What it must contain / do
+gateway-config/envoy-permissive.yaml Standard Envoy routing config, forwarding to
+sidecar-compose-post (and other entry-point
+sidecars as needed) with no explicit header
+filtering ΓÇô the default, unmodified passthrough
+case.
+gateway-config/envoy-hardened.yaml The same routing rules, but with an explicit
+request_headers_to_remove (or equivalent
+Envoy header-manipulation filter) that strips
+any header not on a small allow-list that
+deliberately excludes X-Rajomon-Tokens and
+X-Rajomon-Price ΓÇô simulating a real,
+restrictively-configured production gateway .
+This is the config expected to break the
+mechanism, on purpose, so the failure mode
+can be observed and documented rather than
+discovered by accident later.
+Compose wiring
+File to edit What it must contain / do
+docker-compose.yml (repo root) Add anenvoy service, image
+envoyproxy/envoy , mounting whichever config
+variant is active (swap the mounted file, or use
+a Compose profile per Section 2.3ΓÇÖs
+infra-in-Docker rule, to switch between
+-permissive and-hardened without editing
+code).
+15
+--- PAGE 16 ---
+Header-survival test script
+File to create What it must contain / do
+load-tests/header-survival-check.sh A shell script that: sends a request through the
+Envoy gateway with X-Rajomon-Tokens: 100
+set; inspects the first sidecarΓÇÖs logs (or a
+temporary debug log line added specifically for
+this check) to confirm whether the header
+arrived intact; prints a clear PASS orFAIL line
+to stdout; runs once against
+envoy-permissive.yaml and once against
+envoy-hardened.yaml , printing both results.
+Exit Conditions ΓÇô V erify Before Phase 6
+Γûíheader-survival-check.sh run against the permissive config prints PASS ΓÇô the header
+survives.
+Γûíheader-survival-check.sh run against the hardened config prints FAIL ΓÇô the header is
+stripped, confirming the risk described in the Context Document is real and reproducible.
+Γûí Under the hardened (failing) config, the request still completes successfully via fail-open
+(Phase 3ΓÇÖs golden rule) ΓÇô confirm there is no error, crash, or hung request, just silently un-
+throttled tra∩¼Çic. This is the single most important safety check in the whole project: a broken
+mechanism must degrade safely , not catastrophically .
+Γûí Both results (pass and fail, with the fail-open confirmation) are written into evaluation-results.md
+at the repo root, in plain language, as a first entry .
+Γûí Commit made with message: [Phase 5] Gateway & Header-Survival Test -- Envoy
+live, header-survival risk empirically confirmed under both configs
+16
+--- PAGE 17 ---
+Phase 6: Evaluation Harness
+Phase Goal
+At the end of this phase, the project produces its actual comparative results: a baseline (no
+Rajomon-HTTP) load-spike test and a Rajomon-HTTP-enabled load-spike test, both run against
+the same benchmark app under the same synthetic tra∩¼Çic pattern, with tail latency and success rate
+recorded for both, plus a set of Grafana dashboards that make the difference visible at a glance.
+Entry Conditions
+ΓÇó Phase 5 exit conditions all verified ΓÇô the header-survival result must be known before the
+evaluation numbers are interpreted, since a failed header-survival test would explain a disap-
+pointing Rajomon-HTTP result.
+What to Build
+Load test scripts
+File to create What it must contain / do
+load-tests/baseline-spike.lua A wrk2 script: 10 seconds warm-up at 4,000
+requests/sec against the compose-post
+endpoint, directly (bypassing sidecars/gateway
+entirely , or with sidecars present but effectively
+inert ΓÇô match whichever the ΓÇ£no controlΓÇ¥
+baseline is meant to represent, and state that
+choice explicitly in the scriptΓÇÖs header
+comment), followed by 15 seconds at a spike
+rate of 10,000 requests/sec.
+load-tests/rajomon-spike.lua The identical warm-up/spike pattern and rate
+asbaseline-spike.lua , but routed through
+the Envoy gateway (permissive config) and
+every sidecar, with a valid X-Rajomon-Tokens
+header attached to every request.
+Dashboards
+File to create What it must contain / do
+observability/grafana-dashboards/tail-latency.json p50/p95/p99 line panel over time, per Context
+Document Section 10.1 row 1.
+observability/grafana-dashboards/goodput-vs-throughput.json Stacked-area panel: success vs. 503 vs. other
+errors over time, per Section 10.1 row 2.
+observability/grafana-dashboards/live-price.json Multi-line panel of rajomon_price_current
+per service, per Section 10.1 row 3.
+observability/grafana-dashboards/token-depletion.json Histogram of rajomon_tokens_remaining , per
+Section 10.1 row 4.
+17
+--- PAGE 18 ---
+Results recording
+File to edit What it must contain / do
+evaluation-results.md Append a results section with: exact wrk2
+output (p50/p99 latency , requests/sec achieved,
+error count) for both baseline-spike.lua and
+rajomon-spike.lua runs, plus a short written
+comparison against the paperΓÇÖs own headline
+claim (Context Document Section 1.1: 78%
+lower tail latency , 45% higher goodput) ΓÇô
+stating plainly whether this projectΓÇÖs
+smaller-scale results point in the same direction,
+without overstating them as equivalent to the
+original paperΓÇÖs cluster-scale numbers (Context
+Document Section 14, limitations talking point
+#12).
+Exit Conditions ΓÇô V erify Before Phase 7
+Γûí Bothbaseline-spike.lua andrajomon-spike.lua complete a full run without wrk2 itself
+erroring out.
+Γûíevaluation-results.md contains real recorded numbers from both runs, not placeholders.
+Γûí All four Grafana dashboards load without a ΓÇ£no dataΓÇ¥ panel during a re-run of
+rajomon-spike.lua .
+Γûí Commit made with message: [Phase 6] Evaluation Harness -- baseline vs.
+Rajomon-HTTP results recorded, dashboards live
+18
+--- PAGE 19 ---
+Phase 7: End-to-End V erification
+Phase Goal
+This phase does not add new code. It is a full manual walkthrough of the entire system, start to
+finish, run by a person following the numbered steps below exactly ΓÇô proving every earlier phaseΓÇÖs
+pieces genuinely work together as one system, not just in isolation.
+Entry Conditions
+ΓÇó Phases 1 through 6 all committed, with every exit-condition checklist previously confirmed.
+End-to-End Manual T est Script
+1. F rom a clean checkout, run docker compose up -d . W ait for all containers to report Up .
+2. Confirm the baseline: curl the Social Network appΓÇÖs entry endpoint directly and confirm a
+normal response, exactly as in Phase 1ΓÇÖs exit condition.
+3. Confirm every sidecar is healthy: curl http://localhost:<port>/healthz for at least
+three different sidecars, confirming 200 OK each time.
+4. Confirm Prometheus has every target UP athttp://localhost:9090/targets .
+5. Runload-tests/header-survival-check.sh . Confirm it prints PASS for the permissive
+config and FAIL (with safe fail-open behavior) for the hardened config, matching Phase 5ΓÇÖs
+recorded result.
+6. Switch to the permissive Envoy config (the one used for real evaluation). Run
+load-tests/baseline-spike.lua . Record its summary output.
+7. Runload-tests/rajomon-spike.lua . Record its summary output.
+8. Open each of the four Grafana dashboards (Phase 6) and visually confirm: the tail-latency
+panel shows a visible spike-and-recovery shape; the goodput-vs-throughput panel visibly sep-
+arates success from 503s during the spike; the live-price panel shows at least one serviceΓÇÖs
+price rising during the spike; the token-depletion histogram is non-empty .
+9. Openevaluation-results.md and confirm the numbers on screen from steps 6-7 match
+whatΓÇÖs recorded in the file.
+10. Rundocker compose down . Confirm a clean shutdown with no orphaned containers ( docker
+ps -a shows nothing from this project left running).
+If every step above completes as described, the project is functionally complete : the core
+mechanism is implemented, deployed across a real multi-service benchmark app, tested through a
+real gateway under both a favorable and an adversarial header-handling configuration, and evalu-
+ated with real, recorded comparative numbers against a documented baseline ΓÇô with every claim
+in the accompanying report and presentation traceable to a step in this walkthrough.
+19
+--- PAGE 20 ---
+Appendix
+A.1 First-Time Setup (in order)
+git clone <repo-url> rajomon-http
+cd rajomon-http
+cp .env.example .env
+# edit .env if any local values need to differ from the defaults
+git clone https://github.com/delimitrou/DeathStarBench.git /tmp/dsb
+cp -r /tmp/dsb/socialNetwork/* benchmark-app/
+# then fill in benchmark-app/SERVICES.md per Phase 1
+docker compose build
+docker compose up -d
+docker compose ps
+A.2 External API Keys
+None required. This project has no dependency on any third-party paid or key-gated API. Every
+component (DeathStarBench, Envoy , Prometheus, Grafana, wrk2) is open-source and runs entirely
+locally .
+A.3 Day-to-Day Dev Commands
+# View logs for one sidecar
+docker compose logs -f sidecar-compose-post
+# View logs for everything
+docker compose logs -f
+# Check which Prometheus targets are up
+curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets'
+# Query current price for every service, live
+curl -s 'http://localhost:9090/api/v1/query?query=rajomon_price_current'
+# Run the Go unit tests
+docker compose run --rm sidecar-compose-post go test ./...
+# Reset everything to a clean state
+docker compose down -v
+docker compose up -d --build
+# Re-run a single load test manually
+docker compose run --rm wrk2 -f /load-tests/rajomon-spike.lua
+20
+--- PAGE 21 ---
+A.4 F ull Commit Message Reference
+(exact text ΓÇô must match the message given in each phaseΓÇÖs Exit Conditions above)
+Phase 1:
+[Phase 1] Environment & Benchmark Baseline --
+Social Network app runs unmodified via Docker Compose
+Phase 2:
+[Phase 2] Sidecar Skeleton --
+transparent pass-through proxy live in front of compose-post-service
+Phase 3:
+[Phase 3] Admission Engine --
+token/price decision logic live on compose-post-service
+Phase 4:
+[Phase 4] Fleet Rollout & Metrics --
+sidecars in front of every service, Prometheus scraping all targets
+Phase 5:
+[Phase 5] Gateway & Header-Survival Test --
+Envoy live, header-survival risk empirically confirmed under both configs
+Phase 6:
+[Phase 6] Evaluation Harness --
+baseline vs. Rajomon-HTTP results recorded, dashboards live
+Phase 7:
+[Phase 7] End-to-End Verification --
+full manual walkthrough passed, project complete
+21
+

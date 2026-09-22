@@ -4,6 +4,8 @@
 # Phase 1: Social Network benchmark app services only.
 # Phase 2: sidecar-compose-post — transparent proxy in front
 #          of compose-post-service (no admission logic yet).
+# Phase 3: Admission engine wired in — token/price decision
+#          logic active on sidecar-compose-post.
 #
 # Later phases will add:
 #   Phase 4  — remaining sidecars + Prometheus + Grafana
@@ -15,10 +17,11 @@ include:
 
 services:
 
-  # ── Phase 2: Sidecar for compose-post-service ─────────────
-  # Transparent reverse proxy — forwards every request to the
-  # real compose-post-service:9090 unchanged, logging each hop.
-  # No admission/token logic yet (that arrives in Phase 3).
+  # ── Phase 2/3: Sidecar for compose-post-service ───────────
+  # Phase 2: transparent reverse proxy.
+  # Phase 3: admission engine active — reads X-Rajomon-Tokens,
+  #          computes local price from in-flight count, forwards
+  #          or rejects with 503 per the Decision Table.
   sidecar-compose-post:
     build:
       context: ./sidecar
@@ -27,6 +30,9 @@ services:
       RAJOMON_SERVICE_NAME: compose-post-service
       RAJOMON_LISTEN_ADDR: ":9464"
       RAJOMON_UPSTREAM_ADDR: compose-post-service:9090
+      # Phase 3: pricing parameters (tune per experiment)
+      RAJOMON_BASE_PRICE: "1.0"
+      RAJOMON_PRICE_SCALE_FACTOR: "0.5"
     ports:
       - "9464:9464"
     depends_on:

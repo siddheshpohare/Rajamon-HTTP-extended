@@ -34,8 +34,12 @@ Rajomon-HTTP/
 │   └── ...                     # Source, datasets, wrk2 scripts, helm charts (from DSB upstream)
 │
 ├── sidecar/                    # Rajomon-HTTP sidecar — Go reverse proxy (Phase 2+)
-│   ├── main.go                 # HTTP server: /healthz, /metrics, catch-all proxy handler
-│   ├── config.go               # SidecarConfig struct + LoadConfigFromEnv()
+│   ├── main.go                 # HTTP server: /healthz, /metrics, catch-all admission+proxy handler
+│   ├── config.go               # SidecarConfig struct + LoadConfigFromEnv() (Phase 3: adds BasePrice, PriceScaleFactor)
+│   ├── headers.go              # ReadTokenHeader / WriteTokenHeader / WritePriceHeader (Phase 3)
+│   ├── pricing.go              # Metrics{InFlight} + GetLocalPrice() (Phase 3)
+│   ├── admission.go            # Verdict type + Decide() — exact Decision Table (Phase 3)
+│   ├── admission_test.go       # Unit tests — every Decision Table row (Phase 3)
 │   ├── go.mod                  # Go module: rajomon-http/sidecar
 │   └── Dockerfile              # Multi-stage build: golang:1.22 → distroless/static
 │
@@ -54,7 +58,7 @@ Rajomon-HTTP/
 |---|-------|--------|----------------|
 | 1 | Environment & Benchmark Baseline | ✅ **Done** | DSB Social Network running unmodified in Docker Compose |
 | 2 | Sidecar Skeleton | ✅ **Done** | Transparent Go reverse proxy in front of `compose-post-service` |
-| 3 | Admission Engine | 🔜 Next | Token/price decision logic on `compose-post-service` |
+| 3 | Admission Engine | ✅ **Done** | Token/price decision logic live on `compose-post-service` |
 | 4 | Fleet Rollout & Metrics | ⏳ Later | Sidecars on all services + Prometheus |
 | 5 | Gateway & Header-Survival Test | ⏳ Later | Envoy gateway + header-survival test |
 | 6 | Evaluation Harness | ⏳ Later | wrk2 load tests + Grafana dashboards |
@@ -132,11 +136,85 @@ Added `sidecar-compose-post` service:
 - Shares the same Docker network as `benchmark-app/` services so it can reach `compose-post-service` by container name
 - `depends_on: compose-post-service`
 
+### Exit conditions verified
+- ✅ `curl http://localhost:9464/healthz` → `200 OK`
+- ✅ Same request sent directly to `compose-post-service` and through the sidecar returns identical response
+- ✅ `docker compose logs sidecar-compose-post` shows a log line for every proxied request
+- ✅ Commit: `[Phase 2] Sidecar Skeleton -- transparent pass-through proxy live in front of compose-post-service`
+
+---
+
+## Phase 3 — Admission Engine
+
+**Goal:** The sidecar in front of `compose-post-service` makes a real admission decision on every
+request — **forward or reject with 503** — based on tokens attached to the request and a
+live, locally-computed price. This is the heart of the entire project (Context Document §8).
+Still deployed on one service only; Phase 4 rolls this logic out everywhere.
+
+### What was built
+
+#### `sidecar/headers.go`
+Header read/write helpers:
+
+| Function | What it does |
+|----------|-------------|
+| `ReadTokenHeader(r)` | Parses `X-Rajomon-Tokens` as an integer; `ok=false` if missing or non-integer |
+| `WriteTokenHeader(r, remaining)` | Sets `X-Rajomon-Tokens` on the outgoing proxied request to the remaining budget |
+| `WritePriceHeader(w, price)` | Sets `X-Rajomon-Price` on the response, formatted to 2 decimal places |
+
+#### `sidecar/pricing.go`
+In-flight counter and price formula:
+
+- `Metrics.IncInFlight()` / `DecInFlight()` — atomic increment/decrement, called at start/end of every proxied request
+- `GetLocalPrice(cfg, metrics)` — returns `BasePrice + PriceScaleFactor × in_flight`
+
+In-flight count is the congestion signal: a simple, real, well-established load signal (same
+principle behind concurrency-based load-shedding libraries used in production systems).
+
+#### `sidecar/admission.go`
+Decision Table — implemented precisely as specified in phase_guide.txt §Phase 3:
+
+| Tokens present & valid? | Tokens vs. price | Verdict | Upstream touched? |
+|------------------------|-----------------|---------|------------------|
+| No | — | `ForwardFailOpen` | Yes |
+| Yes | tokens ≥ price | `Forward` | Yes |
+| Yes | tokens < price | `RejectInsufficientTokens` | No |
+
+#### `sidecar/admission_test.go`
+Unit tests covering every row of the Decision Table (including edge cases), using Go's standard `testing` package.
+
+#### `sidecar/config.go` (updated)
+Added two new optional pricing fields with safe defaults:
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `RAJOMON_BASE_PRICE` | `1.0` | Minimum price even at zero load |
+| `RAJOMON_PRICE_SCALE_FACTOR` | `0.5` | Price increase per in-flight request |
+
+#### `sidecar/main.go` (updated)
+The catch-all proxy handler now runs the full admission loop before forwarding:
+
+```
+metrics.IncInFlight()
+defer metrics.DecInFlight()
+tokens, ok = ReadTokenHeader(request)
+price      = GetLocalPrice(config, metrics)
+verdict    = Decide(tokens, ok, price)
+
+RejectInsufficientTokens → 503 "rajomon-http: insufficient tokens for current price"
+Forward                  → WriteTokenHeader(remaining), proxy, WritePriceHeader
+ForwardFailOpen          → proxy unchanged, WritePriceHeader (no token accounting)
+```
+
+#### `docker-compose.yml` (updated)
+Added `RAJOMON_BASE_PRICE` and `RAJOMON_PRICE_SCALE_FACTOR` to the `sidecar-compose-post` service.
+
 ### Exit conditions to verify
-- [ ] `curl http://localhost:9464/healthz` → `200 OK`
-- [ ] Same request sent directly to `compose-post-service` and through the sidecar returns identical response
-- [ ] `docker compose logs sidecar-compose-post` shows a log line for every proxied request
-- [ ] Commit: `[Phase 2] Sidecar Skeleton -- transparent pass-through proxy live in front of compose-post-service`
+- [ ] `go test ./sidecar/...` passes, covering all three Decision Table rows
+- [ ] `curl -H "X-Rajomon-Tokens: 100" http://localhost:9464/...` → normal upstream response + `X-Rajomon-Price` header on response
+- [ ] `curl -H "X-Rajomon-Tokens: 0" http://localhost:9464/...` → `503` with body `rajomon-http: insufficient tokens for current price`; no new log line in `compose-post-service` logs
+- [ ] `curl http://localhost:9464/...` (no token header) → succeeds normally (fail-open)
+- [ ] Commit: `[Phase 3] Admission Engine -- token/price decision logic live on compose-post-service`
 
 ---
 

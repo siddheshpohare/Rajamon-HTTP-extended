@@ -3,9 +3,10 @@ package main
 import (
 	"log"
 	"os"
+	"strconv"
 )
 
-// SidecarConfig holds the three required environment variables for a sidecar instance.
+// SidecarConfig holds all environment-sourced configuration for a sidecar instance.
 type SidecarConfig struct {
 	// ServiceName identifies this sidecar in logs and metrics (e.g. "compose-post-service")
 	ServiceName string
@@ -14,9 +15,18 @@ type SidecarConfig struct {
 	// UpstreamAddr is the host:port of the real service this sidecar proxies to
 	// (e.g. "compose-post-service:9090")
 	UpstreamAddr string
+
+	// ── Phase 3: Admission engine pricing ────────────────────────────────────
+	// BasePrice is the minimum price this service charges even at zero load.
+	// Sourced from RAJOMON_BASE_PRICE; default 1.0.
+	BasePrice float64
+	// PriceScaleFactor controls how steeply price rises per in-flight request.
+	// Sourced from RAJOMON_PRICE_SCALE_FACTOR; default 0.5.
+	PriceScaleFactor float64
 }
 
-// LoadConfigFromEnv reads the three required env vars and exits non-zero if any is missing.
+// LoadConfigFromEnv reads all required and optional env vars.
+// Exits non-zero if any required variable is missing.
 func LoadConfigFromEnv() SidecarConfig {
 	cfg := SidecarConfig{
 		ServiceName:  os.Getenv("RAJOMON_SERVICE_NAME"),
@@ -39,5 +49,24 @@ func LoadConfigFromEnv() SidecarConfig {
 		log.Fatalf("sidecar: missing required environment variable(s): %v", missing)
 	}
 
+	// ── Phase 3: pricing parameters (optional, with safe defaults) ───────────
+	cfg.BasePrice = parseFloatEnv("RAJOMON_BASE_PRICE", 1.0)
+	cfg.PriceScaleFactor = parseFloatEnv("RAJOMON_PRICE_SCALE_FACTOR", 0.5)
+
 	return cfg
+}
+
+// parseFloatEnv returns the float64 value of the named env var, or defaultVal
+// if the variable is unset or empty. Exits non-zero if the value is set but
+// not a valid float, to catch misconfigured experiments early.
+func parseFloatEnv(name string, defaultVal float64) float64 {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return defaultVal
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		log.Fatalf("sidecar: env var %s=%q is not a valid float: %v", name, raw, err)
+	}
+	return v
 }

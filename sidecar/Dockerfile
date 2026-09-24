@@ -1,8 +1,9 @@
 # ─── Stage 1: Build ───────────────────────────────────────────────────────────
-# Use the official Go 1.22 image to compile a fully static binary.
+# Use the official Go 1.25 image to compile a fully static binary.
 # CGO_ENABLED=0 + GOOS=linux ensures no dynamic libc dependency,
 # so the binary runs in a minimal distroless image (Stage 2).
-FROM golang:1.22 AS builder
+# NOTE: golang:1.25 is required by prometheus/client_golang v1.24+ (Phase 4).
+FROM golang:1.25 AS builder
 
 WORKDIR /build
 

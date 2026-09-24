@@ -1,0 +1,37 @@
+# ============================================================
+# Prometheus Configuration — Rajomon-HTTP Phase 4
+#
+# Scrapes /metrics from every sidecar (11 services × port range 9464–9474).
+# All sidecars share the same Docker network (rajomon-http_default), so
+# Prometheus reaches them by container name.
+# ============================================================
+
+global:
+  scrape_interval: 5s      # How often to scrape each target
+  evaluation_interval: 5s  # How often to evaluate alerting rules
+
+scrape_configs:
+
+  # ── Prometheus self-monitoring ──────────────────────────────
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ── Rajomon sidecars (one per business-logic service) ──────
+  # Each sidecar exposes /metrics on its own port.
+  # The service_name label comes from the metric ConstLabels set in metrics.go.
+  - job_name: rajomon_sidecars
+    static_configs:
+      - targets:
+          - sidecar-compose-post:9464
+          - sidecar-social-graph:9465
+          - sidecar-post-storage:9466
+          - sidecar-user-timeline:9467
+          - sidecar-url-shorten:9468
+          - sidecar-user:9469
+          - sidecar-media:9470
+          - sidecar-text:9471
+          - sidecar-unique-id:9472
+          - sidecar-user-mention:9473
+          - sidecar-home-timeline:9474
+    metrics_path: /metrics

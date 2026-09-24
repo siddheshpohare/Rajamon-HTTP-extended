@@ -10,7 +10,7 @@ services:
         condition: service_started
       social-graph-mongodb:
         condition: service_started
-    restart: always
+    restart: no
     entrypoint: SocialGraphService
     volumes:
       - ./config:/social-network-microservices/config
@@ -20,28 +20,28 @@ services:
     hostname: social-graph-mongodb
     # ports:
     #   - 27018:27017
-    restart: always
+    restart: no
 
   social-graph-redis:
     image: redis
     hostname: social-graph-redis
     # ports:
     #   - 6380:6379
-    restart: always
+    restart: no
 
   home-timeline-redis:
     image: redis
     hostname: home-timeline-redis
     # ports:
     #   - 6381:6379
-    restart: always
+    restart: no
 
   compose-post-service:
     image: deathstarbench/social-network-microservices:latest
     hostname: compose-post-service
     #    ports:
     #      - 10001:9090
-    restart: always
+    restart: no
     depends_on:
       jaeger-agent:
         condition: service_started
@@ -54,7 +54,7 @@ services:
     hostname: post-storage-service
     ports:
       - 10002:9090
-    restart: always
+    restart: no
     depends_on:
       jaeger-agent:
         condition: service_started
@@ -69,21 +69,21 @@ services:
     hostname: post-storage-memcached
     #    ports:
     #      - 11212:11211
-    restart: always
+    restart: no
 
   post-storage-mongodb:
     image: mongo:4.4.6
     hostname: post-storage-mongodb
     #    ports:
     #      - 27019:27017
-    restart: always
+    restart: no
 
   user-timeline-service:
     image: deathstarbench/social-network-microservices:latest
     hostname: user-timeline-service
     #    ports:
     #      - 10003:9090
-    restart: always
+    restart: no
     depends_on:
       jaeger-agent:
         condition: service_started
@@ -98,21 +98,21 @@ services:
     hostname: user-timeline-redis
     #    ports:
     #      - 6383:6379
-    restart: always
+    restart: no
 
   user-timeline-mongodb:
     image: mongo:4.4.6
     hostname: user-timeline-mongodb
     #    ports:
     #      - 27020:27017
-    restart: always
+    restart: no
 
   url-shorten-service:
     image: deathstarbench/social-network-microservices:latest
     hostname: url-shorten-service
     #    ports:
     #      - 10004:9090
-    restart: always
+    restart: no
     entrypoint: UrlShortenService
     depends_on:
       jaeger-agent:
@@ -127,21 +127,21 @@ services:
     hostname: url-shorten-memcached
     #    ports:
     #      - 11213:11211
-    restart: always
+    restart: no
 
   url-shorten-mongodb:
     image: mongo:4.4.6
     hostname: url-shorten-mongodb
     #    ports:
     #      - 27021:27017
-    restart: always
+    restart: no
 
   user-service:
     image: deathstarbench/social-network-microservices:latest
     hostname: user-service
     #    ports:
     #      - 10005:9090
-    restart: always
+    restart: no
     depends_on:
       jaeger-agent:
         condition: service_started
@@ -156,14 +156,14 @@ services:
     hostname: user-memcached
     #    ports:
     #      - 11214:11211
-    restart: always
+    restart: no
 
   user-mongodb:
     image: mongo:4.4.6
     hostname: user-mongodb
     # ports:
     #   - 27023:27017
-    restart: always
+    restart: no
 
   media-service:
     image: deathstarbench/social-network-microservices:latest
@@ -175,7 +175,7 @@ services:
         condition: service_started
       media-mongodb:
         condition: service_started
-    restart: always
+    restart: no
     entrypoint: MediaService
     volumes:
       - ./config:/social-network-microservices/config
@@ -185,21 +185,21 @@ services:
     hostname: media-memcached
     #    ports:
     #      - 11215:11211
-    restart: always
+    restart: no
 
   media-mongodb:
     image: mongo:4.4.6
     hostname: media-mongodb
     #    ports:
     #      - 27024:27017
-    restart: always
+    restart: no
 
   text-service:
     image: deathstarbench/social-network-microservices:latest
     hostname: text-service
     #    ports:
     #      - 10007:9090
-    restart: always
+    restart: no
     depends_on:
       jaeger-agent:
         condition: service_started
@@ -212,7 +212,7 @@ services:
     hostname: unique-id-service
     #    ports:
     #      - 10008:9090
-    restart: always
+    restart: no
     depends_on:
       jaeger-agent:
         condition: service_started
@@ -228,7 +228,7 @@ services:
     depends_on:
       jaeger-agent:
         condition: service_started
-    restart: always
+    restart: no
     entrypoint: UserMentionService
     volumes:
       - ./config:/social-network-microservices/config
@@ -241,7 +241,7 @@ services:
     depends_on:
       jaeger-agent:
         condition: service_started
-    restart: always
+    restart: no
     entrypoint: HomeTimelineService
     volumes:
       - ./config:/social-network-microservices/config
@@ -254,7 +254,7 @@ services:
     depends_on:
       jaeger-agent:
         condition: service_started
-    restart: always
+    restart: no
     volumes:
       - ./nginx-web-server/lua-scripts:/usr/local/openresty/nginx/lua-scripts
       - ./nginx-web-server/pages:/usr/local/openresty/nginx/pages
@@ -268,7 +268,7 @@ services:
     hostname: media-frontend
     ports:
       - 8081:8080
-    restart: always
+    restart: no
     depends_on:
       jaeger-agent:
         condition: service_started
@@ -286,6 +286,6 @@ services:
       - 16686:16686
       #      - 14268:14268
       #      - 9411:9411
-    restart: always
+    restart: no
     environment:
       - COLLECTOR_ZIPKIN_HTTP_PORT=9411

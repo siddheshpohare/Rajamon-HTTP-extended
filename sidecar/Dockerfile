@@ -8,11 +8,13 @@ WORKDIR /build
 
 # Copy module files first so Docker layer-caches the dependency download
 # separately from the source code (speeds up rebuilds when only .go files change).
+# Phase 4: copy all .go files before tidy so the tool can resolve imports.
 COPY go.mod ./
-RUN go mod download
-
-# Copy source and build a static binary
 COPY *.go ./
+# go mod tidy downloads missing modules (prometheus/client_golang added in Phase 4)
+# and writes go.sum, then the explicit download makes layer caching effective.
+RUN go mod tidy && go mod download
+
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o sidecar .
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────────

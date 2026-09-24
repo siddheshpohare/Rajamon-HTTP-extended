@@ -5,13 +5,19 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
 	cfg := LoadConfigFromEnv()
 
+	// Phase 4: register Prometheus metrics labelled with this sidecar's service name.
+	pm := NewSidecarMetrics(cfg.ServiceName)
+
 	// Shared in-flight counter — updated atomically on every proxied request.
-	metrics := &Metrics{}
+	// Phase 4: pm is attached so Inc/Dec also update the Prometheus gauge.
+	metrics := &Metrics{pm: pm}
 
 	// Parse the upstream address into a URL for the reverse proxy.
 	upstreamURL, err := url.Parse("http://" + cfg.UpstreamAddr)
@@ -30,12 +36,10 @@ func main() {
 		w.Write([]byte("ok"))
 	})
 
-	// GET /metrics — Phase 2 placeholder (real Prometheus metrics arrive in Phase 4)
-	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
-		// Empty body — placeholder until Phase 4 wires up prometheus/client_golang
-	})
+	// GET /metrics — Phase 4: real Prometheus metrics endpoint.
+	// Exposes rajomon_sidecar_requests_total, rajomon_sidecar_in_flight_requests,
+	// rajomon_sidecar_admission_price, plus standard Go runtime metrics.
+	mux.Handle("/metrics", promhttp.Handler())
 
 	// Catch-all — admission engine + reverse proxy (Phase 3)
 	//
@@ -62,6 +66,9 @@ func main() {
 			// Upstream is never touched — respond immediately with 503.
 			log.Printf("sidecar[%s]: REJECT %s %s tokens=%d price=%.2f",
 				cfg.ServiceName, r.Method, r.URL.Path, tokens, price)
+			// Phase 4: record rejection in Prometheus.
+			pm.RequestsTotal.WithLabelValues("reject_insufficient_tokens").Inc()
+			pm.AdmissionPrice.WithLabelValues("reject_insufficient_tokens").Observe(price)
 			http.Error(w, "rajomon-http: insufficient tokens for current price",
 				http.StatusServiceUnavailable)
 
@@ -70,6 +77,9 @@ func main() {
 			WriteTokenHeader(r, tokens-int(price))
 			log.Printf("sidecar[%s]: FORWARD %s %s tokens=%d→%d price=%.2f",
 				cfg.ServiceName, r.Method, r.URL.Path, tokens, tokens-int(price), price)
+			// Phase 4: record forward in Prometheus.
+			pm.RequestsTotal.WithLabelValues("forward").Inc()
+			pm.AdmissionPrice.WithLabelValues("forward").Observe(price)
 			proxy.ServeHTTP(w, r)
 			WritePriceHeader(w, price)
 
@@ -77,6 +87,9 @@ func main() {
 			// No token header — proxy unchanged, still stamp price for observability.
 			log.Printf("sidecar[%s]: FAIL-OPEN %s %s price=%.2f",
 				cfg.ServiceName, r.Method, r.URL.Path, price)
+			// Phase 4: record fail-open in Prometheus.
+			pm.RequestsTotal.WithLabelValues("forward_fail_open").Inc()
+			pm.AdmissionPrice.WithLabelValues("forward_fail_open").Observe(price)
 			proxy.ServeHTTP(w, r)
 			WritePriceHeader(w, price)
 		}

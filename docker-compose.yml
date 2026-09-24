@@ -6,35 +6,219 @@
 #          of compose-post-service (no admission logic yet).
 # Phase 3: Admission engine wired in — token/price decision
 #          logic active on sidecar-compose-post.
+# Phase 4: Fleet rollout — sidecars on ALL 11 services +
+#          Prometheus (:9090) + Grafana (:3000).
 #
 # Later phases will add:
-#   Phase 4  — remaining sidecars + Prometheus + Grafana
 #   Phase 5  — Envoy gateway
 # ============================================================
 
 include:
   - path: benchmark-app/docker-compose.yml
 
+# ── Shared x-sidecar template ─────────────────────────────────────────────────
+# All sidecars use the same image (built once from ./sidecar) and the same
+# restart policy. Only service-specific env vars differ.
+x-sidecar-defaults: &sidecar-defaults
+  build:
+    context: ./sidecar
+    dockerfile: Dockerfile
+  restart: "no"
+  # Phase 3 pricing parameters — tunable per experiment via .env
+  environment: &sidecar-env
+    RAJOMON_BASE_PRICE: "${RAJOMON_BASE_PRICE:-1.0}"
+    RAJOMON_PRICE_SCALE_FACTOR: "${RAJOMON_PRICE_SCALE_FACTOR:-0.5}"
+
 services:
 
-  # ── Phase 2/3: Sidecar for compose-post-service ───────────
-  # Phase 2: transparent reverse proxy.
-  # Phase 3: admission engine active — reads X-Rajomon-Tokens,
-  #          computes local price from in-flight count, forwards
-  #          or rejects with 503 per the Decision Table.
+  # ══════════════════════════════════════════════════════════
+  # Phase 2/3/4: Sidecars — one per business-logic service
+  # ══════════════════════════════════════════════════════════
+
+  # ── compose-post-service (Phase 2 primary — admission active since Phase 3) ──
   sidecar-compose-post:
-    build:
-      context: ./sidecar
-      dockerfile: Dockerfile
+    <<: *sidecar-defaults
     environment:
+      <<: *sidecar-env
       RAJOMON_SERVICE_NAME: compose-post-service
       RAJOMON_LISTEN_ADDR: ":9464"
       RAJOMON_UPSTREAM_ADDR: compose-post-service:9090
-      # Phase 3: pricing parameters (tune per experiment)
-      RAJOMON_BASE_PRICE: "1.0"
-      RAJOMON_PRICE_SCALE_FACTOR: "0.5"
     ports:
       - "9464:9464"
     depends_on:
       - compose-post-service
-    restart: always
+
+  # ── social-graph-service ────────────────────────────────────────────────────
+  sidecar-social-graph:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: social-graph-service
+      RAJOMON_LISTEN_ADDR: ":9465"
+      RAJOMON_UPSTREAM_ADDR: social-graph-service:9090
+    ports:
+      - "9465:9465"
+    depends_on:
+      - social-graph-service
+
+  # ── post-storage-service ────────────────────────────────────────────────────
+  sidecar-post-storage:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: post-storage-service
+      RAJOMON_LISTEN_ADDR: ":9466"
+      RAJOMON_UPSTREAM_ADDR: post-storage-service:9090
+    ports:
+      - "9466:9466"
+    depends_on:
+      - post-storage-service
+
+  # ── user-timeline-service ───────────────────────────────────────────────────
+  sidecar-user-timeline:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: user-timeline-service
+      RAJOMON_LISTEN_ADDR: ":9467"
+      RAJOMON_UPSTREAM_ADDR: user-timeline-service:9090
+    ports:
+      - "9467:9467"
+    depends_on:
+      - user-timeline-service
+
+  # ── url-shorten-service ─────────────────────────────────────────────────────
+  sidecar-url-shorten:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: url-shorten-service
+      RAJOMON_LISTEN_ADDR: ":9468"
+      RAJOMON_UPSTREAM_ADDR: url-shorten-service:9090
+    ports:
+      - "9468:9468"
+    depends_on:
+      - url-shorten-service
+
+  # ── user-service ────────────────────────────────────────────────────────────
+  sidecar-user:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: user-service
+      RAJOMON_LISTEN_ADDR: ":9469"
+      RAJOMON_UPSTREAM_ADDR: user-service:9090
+    ports:
+      - "9469:9469"
+    depends_on:
+      - user-service
+
+  # ── media-service ───────────────────────────────────────────────────────────
+  sidecar-media:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: media-service
+      RAJOMON_LISTEN_ADDR: ":9470"
+      RAJOMON_UPSTREAM_ADDR: media-service:9090
+    ports:
+      - "9470:9470"
+    depends_on:
+      - media-service
+
+  # ── text-service ────────────────────────────────────────────────────────────
+  sidecar-text:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: text-service
+      RAJOMON_LISTEN_ADDR: ":9471"
+      RAJOMON_UPSTREAM_ADDR: text-service:9090
+    ports:
+      - "9471:9471"
+    depends_on:
+      - text-service
+
+  # ── unique-id-service ───────────────────────────────────────────────────────
+  sidecar-unique-id:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: unique-id-service
+      RAJOMON_LISTEN_ADDR: ":9472"
+      RAJOMON_UPSTREAM_ADDR: unique-id-service:9090
+    ports:
+      - "9472:9472"
+    depends_on:
+      - unique-id-service
+
+  # ── user-mention-service ────────────────────────────────────────────────────
+  sidecar-user-mention:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: user-mention-service
+      RAJOMON_LISTEN_ADDR: ":9473"
+      RAJOMON_UPSTREAM_ADDR: user-mention-service:9090
+    ports:
+      - "9473:9473"
+    depends_on:
+      - user-mention-service
+
+  # ── home-timeline-service ───────────────────────────────────────────────────
+  sidecar-home-timeline:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: home-timeline-service
+      RAJOMON_LISTEN_ADDR: ":9474"
+      RAJOMON_UPSTREAM_ADDR: home-timeline-service:9090
+    ports:
+      - "9474:9474"
+    depends_on:
+      - home-timeline-service
+
+  # ══════════════════════════════════════════════════════════
+  # Phase 4: Observability stack — Prometheus + Grafana
+  # ══════════════════════════════════════════════════════════
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: "no"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    depends_on:
+      - sidecar-compose-post
+      - sidecar-social-graph
+      - sidecar-post-storage
+      - sidecar-user-timeline
+      - sidecar-url-shorten
+      - sidecar-user
+      - sidecar-media
+      - sidecar-text
+      - sidecar-unique-id
+      - sidecar-user-mention
+      - sidecar-home-timeline
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: "no"
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: rajomon
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus

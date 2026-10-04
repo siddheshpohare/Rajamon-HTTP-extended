@@ -8,9 +8,9 @@
 #          logic active on sidecar-compose-post.
 # Phase 4: Fleet rollout — sidecars on ALL 11 services +
 #          Prometheus (:9090) + Grafana (:3000).
-#
-# Later phases will add:
-#   Phase 5  — Envoy gateway
+# Phase 5: Envoy gateway on port 10000 (two Compose profiles):
+#          --profile permissive  passes X-Rajomon-Tokens intact (PASS)
+#          --profile hardened    strips X-Rajomon-Tokens (FAIL → fail-open)
 # ============================================================
 
 include:
@@ -222,3 +222,44 @@ services:
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
+
+  # ══════════════════════════════════════════════════════════
+  # Phase 5: Envoy Gateway — two variants via Compose profiles
+  #
+  # Usage:
+  #   docker compose --profile permissive up -d   (PASS case — tokens survive)
+  #   docker compose --profile hardened  up -d    (FAIL case — tokens stripped)
+  #
+  # Both listen on host port 10000 → forward to sidecar-compose-post:9464.
+  # Admin UI available at http://localhost:9901 (both configs).
+  # ══════════════════════════════════════════════════════════
+
+  # ── Permissive gateway — passes X-Rajomon-Tokens intact ─────────────────────
+  envoy-permissive:
+    image: envoyproxy/envoy:v1.31-latest
+    restart: "no"
+    profiles:
+      - permissive
+    ports:
+      - "10000:10000"   # Gateway entry point
+      - "9901:9901"     # Envoy admin UI
+    volumes:
+      - ./gateway-config/envoy-permissive.yaml:/etc/envoy/envoy.yaml:ro
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+    depends_on:
+      - sidecar-compose-post
+
+  # ── Hardened gateway — strips X-Rajomon-Tokens (risk demonstration) ─────────
+  envoy-hardened:
+    image: envoyproxy/envoy:v1.31-latest
+    restart: "no"
+    profiles:
+      - hardened
+    ports:
+      - "10000:10000"   # Same gateway port — swap configs by switching profile
+      - "9901:9901"     # Envoy admin UI
+    volumes:
+      - ./gateway-config/envoy-hardened.yaml:/etc/envoy/envoy.yaml:ro
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+    depends_on:
+      - sidecar-compose-post

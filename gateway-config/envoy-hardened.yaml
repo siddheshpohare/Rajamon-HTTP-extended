@@ -1,0 +1,80 @@
+################################################################################
+# Rajamon-HTTP — Phase 5: Envoy Gateway (HARDENED config)
+#
+# Behaviour: strips all non-allow-listed headers before forwarding.
+# X-Rajomon-Tokens is NOT on the allow-list — it is silently removed.
+# This simulates a real, restrictively-configured production gateway.
+#
+# Expected header-survival-check.sh result:
+#   FAIL (header stripped) — but the request still completes via fail-open,
+#   proving the mechanism degrades safely rather than catastrophically.
+################################################################################
+
+static_resources:
+
+  listeners:
+    - name: rajomon_gateway_hardened
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 10000
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: rajomon_gateway_hardened
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+
+                # ── Header-sanitisation filter ────────────────────────────────
+                # Strips any header not on this narrow allow-list.
+                # X-Rajomon-Tokens and X-Rajomon-Price are deliberately excluded
+                # to reproduce the real risk documented in Context Document §1.1
+                # and Design Decision #6.
+                # ─────────────────────────────────────────────────────────────
+                http_filters:
+                  - name: envoy.filters.http.header_mutation
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
+                      mutations:
+                        request_mutations:
+                          - remove: "x-rajomon-tokens"
+                          - remove: "x-rajomon-price"
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                route_config:
+                  name: rajomon_routes_hardened
+                  virtual_hosts:
+                    - name: rajomon_backend_hardened
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: sidecar_compose_post
+                            timeout: 10s
+
+  clusters:
+    - name: sidecar_compose_post
+      connect_timeout: 1s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: sidecar_compose_post
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: sidecar-compose-post
+                      port_value: 9464
+
+admin:
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901

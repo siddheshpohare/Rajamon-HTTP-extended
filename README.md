@@ -71,7 +71,7 @@ Rajamon-HTTP/
 | 2 | Sidecar Skeleton | ✅ **Done** | Transparent Go reverse proxy in front of `compose-post-service` |
 | 3 | Admission Engine | ✅ **Done** | Token/price decision logic live on `compose-post-service` |
 | 4 | Fleet Rollout & Metrics | ✅ **Done** | Sidecars on all 11 services + Prometheus + Grafana |
-| 5 | Gateway & Header-Survival Test | ⏳ Later | Envoy gateway + header-survival test |
+| 5 | Gateway & Header-Survival Test | ✅ **Done** | Envoy gateway (permissive & hardened profiles) + header-survival test |
 | 6 | Evaluation Harness | ⏳ Later | wrk2 load tests + Grafana dashboards |
 | 7 | End-to-End Verification | ⏳ Later | Full manual walkthrough |
 
@@ -285,13 +285,42 @@ Auto-provisioned datasource + dashboard provider + `rajomon_fleet.json` dashboar
 | In-flight per sidecar (timeseries) | `rajomon_sidecar_in_flight_requests` |
 | Price p50/p95/p99 per service (timeseries) | `histogram_quantile(0.{50,95,99}, ...)` |
 
-### Exit conditions to verify
-- [ ] `docker compose up -d --build` starts 38 containers with no failures (27 DSB + 11 sidecars + Prometheus + Grafana + Jaeger)
-- [ ] `curl http://localhost:9464/metrics` → Prometheus text format with `rajomon_sidecar_*` metrics
-- [ ] `curl http://localhost:9465/metrics` → metrics for `social-graph-service`
-- [ ] Prometheus UI (`http://localhost:9090`) → Status > Targets — all 11 sidecar targets `UP`
-- [ ] Grafana (`http://localhost:3000`) → "Rajomon-HTTP — Sidecar Fleet Overview" dashboard loads with live data
-- [ ] Commit: `[Phase 4] Fleet Rollout & Metrics -- all 11 sidecars + Prometheus + Grafana`
+### Exit conditions verified
+- ✅ `docker compose up -d --build` starts 38 containers with no failures (27 DSB + 11 sidecars + Prometheus + Grafana + Jaeger)
+- ✅ `curl http://localhost:9464/metrics` → Prometheus text format with `rajomon_sidecar_*` metrics
+- ✅ `curl http://localhost:9465/metrics` → metrics for `social-graph-service`
+- ✅ Prometheus UI (`http://localhost:9090`) → Status > Targets — all 11 sidecar targets `UP`
+- ✅ Grafana (`http://localhost:3000`) → "Rajomon-HTTP — Sidecar Fleet Overview" dashboard loads with live data
+- ✅ Commit: `[Phase 4] Fleet Rollout & Metrics -- all 11 sidecars + Prometheus + Grafana`
+
+---
+
+## Phase 5 — Gateway & Header-Survival Test
+
+**Goal:** Place an Envoy edge gateway in front of the sidecar fleet on port `10000` and empirically test whether `X-Rajomon-Tokens` survives a real gateway hop. Two profiles are defined to demonstrate both normal operation and safe degradation:
+
+```
+Client → [Envoy Gateway :10000] → [Sidecar :9464] → compose-post-service:9090
+```
+
+### What was built
+
+#### Envoy Configurations (`gateway-config/`)
+- `gateway-config/envoy-permissive.yaml`: Standard HTTP reverse proxy. Passes all request headers through untouched to `sidecar-compose-post:9464`.
+- `gateway-config/envoy-hardened.yaml`: Restrictive gateway with `envoy.filters.http.header_mutation` filter explicitly stripping non-standard headers (`remove: "x-rajomon-tokens"`).
+
+#### Automated Check Scripts (`load-tests/`)
+- `load-tests/header-survival-check.ps1`: Native Windows PowerShell test script.
+- `load-tests/header-survival-check.sh`: Bash/Linux test script.
+- Sends requests with `X-Rajomon-Tokens: 100` through Envoy and inspects sidecar logs to verify `FORWARD` vs `FAIL-OPEN`.
+
+#### Docker Compose Profiles
+- Added `envoy-permissive` (`--profile permissive`) and `envoy-hardened` (`--profile hardened`) to root `docker-compose.yml`.
+
+### Exit conditions verified
+- ✅ Permissive gateway: `X-Rajomon-Tokens` arrives intact → sidecar logs `FORWARD tokens=100→99`. PASS.
+- ✅ Hardened gateway: header stripped → sidecar detects missing token and executes `FAIL-OPEN`. Request completes safely without hanging or crashing.
+- ✅ Results recorded in `evaluation-results.md`.
 
 ---
 

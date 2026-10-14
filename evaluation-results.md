@@ -8,22 +8,22 @@
 
 ## Phase 5: Gateway & Header-Survival Test
 
-**Date:** _(fill in when run)_
+**Date:** 2026-10-14
 
 **Test:** Does `X-Rajomon-Tokens` survive a real Envoy gateway hop?
 
 ### Method
 
 1. Start the stack with `docker compose --profile <config> up -d`
-2. Send `GET http://localhost:10000/healthz` with `X-Rajomon-Tokens: 100`
-3. Check sidecar-compose-post logs for `FORWARD` (header present) or `FAIL-OPEN` (header stripped)
+2. Send `GET http://localhost:10000/survival-test` with `X-Rajomon-Tokens: 100`
+3. Check `sidecar-compose-post` logs for `FORWARD` (header present) or `FAIL-OPEN` (header stripped)
 
 ### Results
 
 | Config | Result | Detail | Timestamp |
 |---|---|---|---|
-| permissive | _(run the check script)_ | | |
-| hardened | _(run the check script)_ | | |
+| `permissive` | **PASS** | `X-Rajomon-Tokens` survived. Sidecar log shows `FORWARD` with `tokens=100→99`. HTTP 502 (upstream mock). | 2026-10-14 18:54:05 |
+| `hardened` | **FAIL (expected -- header stripped)** | Header stripped by Envoy `header_mutation`. Sidecar log shows `FAIL-OPEN`: request completed safely. HTTP 502. Fail-open confirmed. | 2026-10-14 18:54:45 |
 
 ### Interpretation
 

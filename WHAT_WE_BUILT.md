@@ -304,63 +304,6 @@ histogram_quantile(0.95, rate(rajomon_sidecar_admission_price_bucket[1m]))
 
 ---
 
-## All Ports at a Glance
-
-| Port | What's there |
-|------|-------------|
-| **8080** | Social Network frontend (nginx) |
-| **8081** | Media frontend |
-| **9090** | Prometheus |
-| **3000** | Grafana (admin / rajomon) |
-| **16686** | Jaeger tracing UI |
-| **9464** | Sidecar — `compose-post-service` |
-| **9465** | Sidecar — `social-graph-service` |
-| **9466** | Sidecar — `post-storage-service` |
-| **9467** | Sidecar — `user-timeline-service` |
-| **9468** | Sidecar — `url-shorten-service` |
-| **9469** | Sidecar — `user-service` |
-| **9470** | Sidecar — `media-service` |
-| **9471** | Sidecar — `text-service` |
-| **9472** | Sidecar — `unique-id-service` |
-| **9473** | Sidecar — `user-mention-service` |
-| **9474** | Sidecar — `home-timeline-service` |
-
----
-
-## Day-to-Day Commands
-
-```bash
-# Start everything
-docker compose up -d --build
-
-# Stop everything (keeps images cached for fast restart)
-docker compose down
-
-# Nuclear reset — wipes volumes (fresh DB state)
-docker compose down -v
-
-# Watch a sidecar's logs live
-docker compose logs -f sidecar-compose-post
-
-# See all container statuses
-docker compose ps
-
-# Run Go unit tests (no local Go needed)
-docker compose run --rm sidecar-compose-post go test ./...
-```
-
----
-
-## What's Left (Phases 6–7)
-
-| Phase | What it is |
-|-------|-----------|
-| **5** | ✅ **DONE** — Envoy gateway at the front — two configs (permissive/hardened) to empirically test header survival |
-| **6** | Run wrk2 load tests — measure latency/goodput with Rajomon vs without |
-| **7** | Full end-to-end walkthrough and final writeup |
-
----
-
 ## Phase 5 — Gateway & Header-Survival Test
 
 ### What it is
@@ -475,3 +418,13 @@ docker compose run --rm sidecar-compose-post go test ./...
 bash load-tests/header-survival-check.sh both         # bash / WSL
 .\load-tests\header-survival-check.ps1 -Config both   # PowerShell
 ```
+
+---
+
+## What's Left (Phases 6–7)
+
+| Phase | What it is | Status |
+|---|---|---|
+| **Phase 6** | Run wrk2 load tests — measure latency and goodput under load spike with Rajomon vs without | ⏳ Up Next |
+| **Phase 7** | Full end-to-end walkthrough verification and final project report | ⏳ Final Step |
+

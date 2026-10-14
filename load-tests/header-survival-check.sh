@@ -39,7 +39,7 @@
 
 set -euo pipefail
 
-GATEWAY_URL="http://localhost:10000/healthz"
+GATEWAY_URL="http://localhost:10000/survival-test"
 TOKEN_VALUE="100"
 COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-rajomon-http}"
 SIDECAR_SERVICE="sidecar-compose-post"

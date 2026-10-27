@@ -1,291 +1,124 @@
-version: "3.9"
+# ============================================================
+# TeaStore Benchmark — Docker Compose
+#
+# Official TeaStore microservice benchmark application.
+# All services communicate via pure REST/HTTP — compatible
+# with the Rajomon-HTTP HTTP reverse-proxy sidecar.
+#
+# Services:
+#   teastore-registry     — Service registry (Eureka-style)
+#   teastore-db           — MariaDB persistence backend
+#   teastore-webui        — Web UI / entry point (:8080)
+#   teastore-auth         — Authentication service (:8080)
+#   teastore-imageprovider— Image provider (:8080)
+#   teastore-recommender  — Recommender (:8080)
+#   teastore-persistence  — Persistence layer (:8080)
+#
+# NOTE: The real service containers use internal hostnames
+#       (teastore-*-upstream) so that sidecars can take over
+#       the public DNS name (teastore-*) via network aliases.
+#       This is defined in the root docker-compose.yml.
+#       In standalone mode (no sidecars), rename these aliases
+#       back to the plain service names.
+# ============================================================
+
 services:
-  social-graph-service:
-    image: deathstarbench/social-network-microservices:latest
-    hostname: social-graph-service
-    #    ports:
-    #      - 10000:9090
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-      social-graph-mongodb:
-        condition: service_started
-    restart: no
-    entrypoint: SocialGraphService
-    volumes:
-      - ./config:/social-network-microservices/config
 
-  social-graph-mongodb:
-    image: mongo:4.4.6
-    hostname: social-graph-mongodb
-    # ports:
-    #   - 27018:27017
-    restart: no
-
-  social-graph-redis:
-    image: redis
-    hostname: social-graph-redis
-    # ports:
-    #   - 6380:6379
-    restart: no
-
-  home-timeline-redis:
-    image: redis
-    hostname: home-timeline-redis
-    # ports:
-    #   - 6381:6379
-    restart: no
-
-  compose-post-service:
-    image: deathstarbench/social-network-microservices:latest
-    hostname: compose-post-service
-    #    ports:
-    #      - 10001:9090
-    restart: no
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-    entrypoint: ComposePostService
-    volumes:
-      - ./config:/social-network-microservices/config
-
-  post-storage-service:
-    image: deathstarbench/social-network-microservices:latest
-    hostname: post-storage-service
+  # ── Service Registry ─────────────────────────────────────
+  # All TeaStore services register here and discover peers.
+  # No sidecar needed — this is infrastructure plumbing, not
+  # a business-logic service with HTTP load we want to control.
+  teastore-registry:
+    image: descartesresearch/teastore-registry:latest
+    hostname: teastore-registry
+    restart: "no"
     ports:
-      - 10002:9090
-    restart: no
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-      post-storage-mongodb:
-        condition: service_started
-    entrypoint: PostStorageService
-    volumes:
-      - ./config:/social-network-microservices/config
+      - "8083:8080"     # Host 8083 → registry HTTP API (avoids conflict with webui :8080)
 
-  post-storage-memcached:
-    image: memcached
-    hostname: post-storage-memcached
-    #    ports:
-    #      - 11212:11211
-    restart: no
-
-  post-storage-mongodb:
-    image: mongo:4.4.6
-    hostname: post-storage-mongodb
-    #    ports:
-    #      - 27019:27017
-    restart: no
-
-  user-timeline-service:
-    image: deathstarbench/social-network-microservices:latest
-    hostname: user-timeline-service
-    #    ports:
-    #      - 10003:9090
-    restart: no
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-      user-timeline-mongodb:
-        condition: service_started
-    entrypoint: UserTimelineService
-    volumes:
-      - ./config:/social-network-microservices/config
-
-  user-timeline-redis:
-    image: redis
-    hostname: user-timeline-redis
-    #    ports:
-    #      - 6383:6379
-    restart: no
-
-  user-timeline-mongodb:
-    image: mongo:4.4.6
-    hostname: user-timeline-mongodb
-    #    ports:
-    #      - 27020:27017
-    restart: no
-
-  url-shorten-service:
-    image: deathstarbench/social-network-microservices:latest
-    hostname: url-shorten-service
-    #    ports:
-    #      - 10004:9090
-    restart: no
-    entrypoint: UrlShortenService
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-      url-shorten-mongodb:
-        condition: service_started
-    volumes:
-      - ./config:/social-network-microservices/config
-
-  url-shorten-memcached:
-    image: memcached
-    hostname: url-shorten-memcached
-    #    ports:
-    #      - 11213:11211
-    restart: no
-
-  url-shorten-mongodb:
-    image: mongo:4.4.6
-    hostname: url-shorten-mongodb
-    #    ports:
-    #      - 27021:27017
-    restart: no
-
-  user-service:
-    image: deathstarbench/social-network-microservices:latest
-    hostname: user-service
-    #    ports:
-    #      - 10005:9090
-    restart: no
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-      user-mongodb:
-        condition: service_started
-    entrypoint: UserService
-    volumes:
-      - ./config:/social-network-microservices/config
-
-  user-memcached:
-    image: memcached
-    hostname: user-memcached
-    #    ports:
-    #      - 11214:11211
-    restart: no
-
-  user-mongodb:
-    image: mongo:4.4.6
-    hostname: user-mongodb
-    # ports:
-    #   - 27023:27017
-    restart: no
-
-  media-service:
-    image: deathstarbench/social-network-microservices:latest
-    hostname: media-service
-    #    ports:
-    #      - 10006:9090
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-      media-mongodb:
-        condition: service_started
-    restart: no
-    entrypoint: MediaService
-    volumes:
-      - ./config:/social-network-microservices/config
-
-  media-memcached:
-    image: memcached
-    hostname: media-memcached
-    #    ports:
-    #      - 11215:11211
-    restart: no
-
-  media-mongodb:
-    image: mongo:4.4.6
-    hostname: media-mongodb
-    #    ports:
-    #      - 27024:27017
-    restart: no
-
-  text-service:
-    image: deathstarbench/social-network-microservices:latest
-    hostname: text-service
-    #    ports:
-    #      - 10007:9090
-    restart: no
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-    entrypoint: TextService
-    volumes:
-      - ./config:/social-network-microservices/config
-
-  unique-id-service:
-    image: deathstarbench/social-network-microservices:latest
-    hostname: unique-id-service
-    #    ports:
-    #      - 10008:9090
-    restart: no
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-    entrypoint: UniqueIdService
-    volumes:
-      - ./config:/social-network-microservices/config
-
-  user-mention-service:
-    image: deathstarbench/social-network-microservices:latest
-    hostname: user-mention-service
-    #    ports:
-    #      - 10009:9090
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-    restart: no
-    entrypoint: UserMentionService
-    volumes:
-      - ./config:/social-network-microservices/config
-
-  home-timeline-service:
-    image: deathstarbench/social-network-microservices:latest
-    hostname: home-timeline-service
-    #    ports:
-    #      - 10010:9090
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-    restart: no
-    entrypoint: HomeTimelineService
-    volumes:
-      - ./config:/social-network-microservices/config
-
-  nginx-thrift:
-    image: yg397/openresty-thrift:xenial
-    hostname: nginx-thrift
+  # ── Database ─────────────────────────────────────────────
+  # MariaDB — speaks MySQL binary protocol, not HTTP.
+  # No sidecar needed or possible for a database.
+  teastore-db:
+    image: descartesresearch/teastore-db:latest
+    hostname: teastore-db
+    restart: "no"
     ports:
-      - 8080:8080
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-    restart: no
-    volumes:
-      - ./nginx-web-server/lua-scripts:/usr/local/openresty/nginx/lua-scripts
-      - ./nginx-web-server/pages:/usr/local/openresty/nginx/pages
-      - ./nginx-web-server/conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf
-      - ./nginx-web-server/jaeger-config.json:/usr/local/openresty/nginx/jaeger-config.json
-      - ./gen-lua:/gen-lua
-      - ./docker/openresty-thrift/lua-thrift:/usr/local/openresty/lualib/thrift
-
-  media-frontend:
-    image: yg397/media-frontend:xenial
-    hostname: media-frontend
-    ports:
-      - 8081:8080
-    restart: no
-    depends_on:
-      jaeger-agent:
-        condition: service_started
-    volumes:
-      - ./media-frontend/lua-scripts:/usr/local/openresty/nginx/lua-scripts
-      - ./media-frontend/conf/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf
-
-  jaeger-agent:
-    image: jaegertracing/all-in-one:latest
-    ports:
-      #      - 5775:5775/udp
-      #      - 6831:6831/udp
-      #      - 6832:6832/udp
-      #      - 5778:5778
-      - 16686:16686
-      #      - 14268:14268
-      #      - 9411:9411
-    restart: no
+      - "3306:3306"
     environment:
-      - COLLECTOR_ZIPKIN_HTTP_PORT=9411
+      MYSQL_ROOT_PASSWORD: teastore
+
+  # ── Web UI ───────────────────────────────────────────────
+  # Entry-point service. In sidecar mode, traffic arrives at
+  # sidecar-webui:9550 which forwards here.
+  # Hostname is teastore-webui-upstream so the sidecar can
+  # claim the teastore-webui alias (see root docker-compose.yml).
+  teastore-webui:
+    image: descartesresearch/teastore-webui:latest
+    hostname: teastore-webui-upstream
+    restart: "no"
+    ports:
+      - "8080:8080"     # Host :8080 — direct access / baseline mode
+    environment:
+      HOST_NAME: "teastore-webui-upstream"
+      REGISTRY_HOST: "teastore-registry"
+      REGISTRY_PORT: "8080"
+      USE_RECOMMENDATION_IMAGES: "false"
+    depends_on:
+      - teastore-registry
+
+  # ── Auth Service ─────────────────────────────────────────
+  teastore-auth:
+    image: descartesresearch/teastore-auth:latest
+    hostname: teastore-auth-upstream
+    restart: "no"
+    environment:
+      HOST_NAME: "teastore-auth-upstream"
+      REGISTRY_HOST: "teastore-registry"
+      REGISTRY_PORT: "8080"
+    depends_on:
+      - teastore-registry
+      - teastore-db
+
+  # ── Image Provider ───────────────────────────────────────
+  teastore-imageprovider:
+    image: descartesresearch/teastore-image:latest
+    hostname: teastore-imageprovider-upstream
+    restart: "no"
+    environment:
+      HOST_NAME: "teastore-imageprovider-upstream"
+      REGISTRY_HOST: "teastore-registry"
+      REGISTRY_PORT: "8080"
+      PRELOAD_IMAGES: "false"
+    depends_on:
+      - teastore-registry
+
+  # ── Recommender ──────────────────────────────────────────
+  teastore-recommender:
+    image: descartesresearch/teastore-recommender:latest
+    hostname: teastore-recommender-upstream
+    restart: "no"
+    environment:
+      HOST_NAME: "teastore-recommender-upstream"
+      REGISTRY_HOST: "teastore-registry"
+      REGISTRY_PORT: "8080"
+    depends_on:
+      - teastore-registry
+      - teastore-db
+
+  # ── Persistence ──────────────────────────────────────────
+  # Database abstraction layer — all services go through here
+  # to reach teastore-db. This is the most contention-prone
+  # service under load — ideal for admission control testing.
+  teastore-persistence:
+    image: descartesresearch/teastore-persistence:latest
+    hostname: teastore-persistence-upstream
+    restart: "no"
+    environment:
+      HOST_NAME: "teastore-persistence-upstream"
+      REGISTRY_HOST: "teastore-registry"
+      REGISTRY_PORT: "8080"
+      DB_HOST: "teastore-db"
+      DB_PORT: "3306"
+    depends_on:
+      - teastore-registry
+      - teastore-db

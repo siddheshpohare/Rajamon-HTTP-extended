@@ -1,30 +1,41 @@
 # ============================================================
 # Rajomon-HTTP — Top-Level Orchestration
 #
-# Phase 1: Social Network benchmark app services only.
-# Phase 2: sidecar-compose-post — transparent proxy in front
-#          of compose-post-service (no admission logic yet).
-# Phase 3: Admission engine wired in — token/price decision
-#          logic active on sidecar-compose-post.
-# Phase 4: Fleet rollout — sidecars on ALL 11 services +
-#          Prometheus (:9090) + Grafana (:3000).
-# Phase 5: Envoy gateway on port 10000 (two Compose profiles):
-#          --profile permissive  passes X-Rajomon-Tokens intact (PASS)
-#          --profile hardened    strips X-Rajomon-Tokens (FAIL → fail-open)
+# Benchmark: TeaStore (REST/HTTP — all services speak HTTP/1.1)
+# Previous benchmark: DeathStarBench Social Network (removed —
+#   used Apache Thrift binary RPC on port 9090, incompatible
+#   with an HTTP reverse-proxy sidecar).
+#
+# Architecture:
+#   Client → Envoy Gateway (:10000)
+#          → sidecar-webui (:9550)       ← admission + proxy
+#          → teastore-webui-upstream:8080 ← real app (unmodified)
+#          → sidecar-auth / sidecar-recommender / etc. (via DNS alias)
+#          → teastore-*-upstream:8080
+#
+# Network alias trick:
+#   Real services run as teastore-<name>-upstream (hidden name).
+#   Sidecars take the teastore-<name> alias (public DNS name).
+#   All inter-service REST calls automatically hit sidecars first.
+#   Zero application code changes required.
+#
+# Profiles:
+#   (default)          — benchmark + sidecars + monitoring
+#   --profile permissive  — add Envoy (passes X-Rajomon-Tokens intact)
+#   --profile hardened    — add Envoy (strips X-Rajomon-Tokens)
 # ============================================================
 
 include:
   - path: benchmark-app/docker-compose.yml
 
-# ── Shared x-sidecar template ─────────────────────────────────────────────────
-# All sidecars use the same image (built once from ./sidecar) and the same
-# restart policy. Only service-specific env vars differ.
+# ── Shared sidecar template ───────────────────────────────────────────────────
+# All sidecars use the same image (built once from ./sidecar).
+# Service-specific env vars and network aliases differ per instance.
 x-sidecar-defaults: &sidecar-defaults
   build:
     context: ./sidecar
     dockerfile: Dockerfile
   restart: "no"
-  # Phase 3 pricing parameters — tunable per experiment via .env
   environment: &sidecar-env
     RAJOMON_BASE_PRICE: "${RAJOMON_BASE_PRICE:-1.0}"
     RAJOMON_PRICE_SCALE_FACTOR: "${RAJOMON_PRICE_SCALE_FACTOR:-0.5}"
@@ -32,154 +43,106 @@ x-sidecar-defaults: &sidecar-defaults
 services:
 
   # ══════════════════════════════════════════════════════════
-  # Phase 2/3/4: Sidecars — one per business-logic service
+  # Sidecars — one per TeaStore business-logic service
+  #
+  # Each sidecar:
+  #   1. Listens under the real service DNS name (network alias)
+  #   2. Forwards to <service>-upstream:8080 (hidden real container)
+  #   3. Runs admission: read X-Rajomon-Tokens, compute price,
+  #      forward or 503, write X-Rajomon-Price on response
   # ══════════════════════════════════════════════════════════
 
-  # ── compose-post-service (Phase 2 primary — admission active since Phase 3) ──
-  sidecar-compose-post:
+  # ── Web UI sidecar ───────────────────────────────────────
+  # Entry-point sidecar. Envoy forwards here. WebUI calls
+  # downstream services which resolve to their sidecars via aliases.
+  sidecar-webui:
     <<: *sidecar-defaults
     environment:
       <<: *sidecar-env
-      RAJOMON_SERVICE_NAME: compose-post-service
-      RAJOMON_LISTEN_ADDR: ":9464"
-      RAJOMON_UPSTREAM_ADDR: compose-post-service:9090
+      RAJOMON_SERVICE_NAME: webui
+      RAJOMON_LISTEN_ADDR: ":9550"
+      RAJOMON_UPSTREAM_ADDR: "teastore-webui-upstream:8080"
     ports:
-      - "9464:9464"
+      - "9550:9550"
+    networks:
+      default:
+        aliases:
+          - teastore-webui    # ← WebUI is discovered under this name by the registry
     depends_on:
-      - compose-post-service
+      - teastore-webui
 
-  # ── social-graph-service ────────────────────────────────────────────────────
-  sidecar-social-graph:
+  # ── Auth sidecar ─────────────────────────────────────────
+  sidecar-auth:
     <<: *sidecar-defaults
     environment:
       <<: *sidecar-env
-      RAJOMON_SERVICE_NAME: social-graph-service
-      RAJOMON_LISTEN_ADDR: ":9465"
-      RAJOMON_UPSTREAM_ADDR: social-graph-service:9090
+      RAJOMON_SERVICE_NAME: auth
+      RAJOMON_LISTEN_ADDR: ":9551"
+      RAJOMON_UPSTREAM_ADDR: "teastore-auth-upstream:8080"
     ports:
-      - "9465:9465"
+      - "9551:9551"
+    networks:
+      default:
+        aliases:
+          - teastore-auth
     depends_on:
-      - social-graph-service
+      - teastore-auth
 
-  # ── post-storage-service ────────────────────────────────────────────────────
-  sidecar-post-storage:
+  # ── Image Provider sidecar ───────────────────────────────
+  sidecar-imageprovider:
     <<: *sidecar-defaults
     environment:
       <<: *sidecar-env
-      RAJOMON_SERVICE_NAME: post-storage-service
-      RAJOMON_LISTEN_ADDR: ":9466"
-      RAJOMON_UPSTREAM_ADDR: post-storage-service:9090
+      RAJOMON_SERVICE_NAME: imageprovider
+      RAJOMON_LISTEN_ADDR: ":9552"
+      RAJOMON_UPSTREAM_ADDR: "teastore-imageprovider-upstream:8080"
     ports:
-      - "9466:9466"
+      - "9552:9552"
+    networks:
+      default:
+        aliases:
+          - teastore-imageprovider
     depends_on:
-      - post-storage-service
+      - teastore-imageprovider
 
-  # ── user-timeline-service ───────────────────────────────────────────────────
-  sidecar-user-timeline:
+  # ── Recommender sidecar ──────────────────────────────────
+  sidecar-recommender:
     <<: *sidecar-defaults
     environment:
       <<: *sidecar-env
-      RAJOMON_SERVICE_NAME: user-timeline-service
-      RAJOMON_LISTEN_ADDR: ":9467"
-      RAJOMON_UPSTREAM_ADDR: user-timeline-service:9090
+      RAJOMON_SERVICE_NAME: recommender
+      RAJOMON_LISTEN_ADDR: ":9553"
+      RAJOMON_UPSTREAM_ADDR: "teastore-recommender-upstream:8080"
     ports:
-      - "9467:9467"
+      - "9553:9553"
+    networks:
+      default:
+        aliases:
+          - teastore-recommender
     depends_on:
-      - user-timeline-service
+      - teastore-recommender
 
-  # ── url-shorten-service ─────────────────────────────────────────────────────
-  sidecar-url-shorten:
+  # ── Persistence sidecar ──────────────────────────────────
+  # Most contention-prone service — persistence handles all DB
+  # reads/writes. Expected to show highest price under load spikes.
+  sidecar-persistence:
     <<: *sidecar-defaults
     environment:
       <<: *sidecar-env
-      RAJOMON_SERVICE_NAME: url-shorten-service
-      RAJOMON_LISTEN_ADDR: ":9468"
-      RAJOMON_UPSTREAM_ADDR: url-shorten-service:9090
+      RAJOMON_SERVICE_NAME: persistence
+      RAJOMON_LISTEN_ADDR: ":9554"
+      RAJOMON_UPSTREAM_ADDR: "teastore-persistence-upstream:8080"
     ports:
-      - "9468:9468"
+      - "9554:9554"
+    networks:
+      default:
+        aliases:
+          - teastore-persistence
     depends_on:
-      - url-shorten-service
-
-  # ── user-service ────────────────────────────────────────────────────────────
-  sidecar-user:
-    <<: *sidecar-defaults
-    environment:
-      <<: *sidecar-env
-      RAJOMON_SERVICE_NAME: user-service
-      RAJOMON_LISTEN_ADDR: ":9469"
-      RAJOMON_UPSTREAM_ADDR: user-service:9090
-    ports:
-      - "9469:9469"
-    depends_on:
-      - user-service
-
-  # ── media-service ───────────────────────────────────────────────────────────
-  sidecar-media:
-    <<: *sidecar-defaults
-    environment:
-      <<: *sidecar-env
-      RAJOMON_SERVICE_NAME: media-service
-      RAJOMON_LISTEN_ADDR: ":9470"
-      RAJOMON_UPSTREAM_ADDR: media-service:9090
-    ports:
-      - "9470:9470"
-    depends_on:
-      - media-service
-
-  # ── text-service ────────────────────────────────────────────────────────────
-  sidecar-text:
-    <<: *sidecar-defaults
-    environment:
-      <<: *sidecar-env
-      RAJOMON_SERVICE_NAME: text-service
-      RAJOMON_LISTEN_ADDR: ":9471"
-      RAJOMON_UPSTREAM_ADDR: text-service:9090
-    ports:
-      - "9471:9471"
-    depends_on:
-      - text-service
-
-  # ── unique-id-service ───────────────────────────────────────────────────────
-  sidecar-unique-id:
-    <<: *sidecar-defaults
-    environment:
-      <<: *sidecar-env
-      RAJOMON_SERVICE_NAME: unique-id-service
-      RAJOMON_LISTEN_ADDR: ":9472"
-      RAJOMON_UPSTREAM_ADDR: unique-id-service:9090
-    ports:
-      - "9472:9472"
-    depends_on:
-      - unique-id-service
-
-  # ── user-mention-service ────────────────────────────────────────────────────
-  sidecar-user-mention:
-    <<: *sidecar-defaults
-    environment:
-      <<: *sidecar-env
-      RAJOMON_SERVICE_NAME: user-mention-service
-      RAJOMON_LISTEN_ADDR: ":9473"
-      RAJOMON_UPSTREAM_ADDR: user-mention-service:9090
-    ports:
-      - "9473:9473"
-    depends_on:
-      - user-mention-service
-
-  # ── home-timeline-service ───────────────────────────────────────────────────
-  sidecar-home-timeline:
-    <<: *sidecar-defaults
-    environment:
-      <<: *sidecar-env
-      RAJOMON_SERVICE_NAME: home-timeline-service
-      RAJOMON_LISTEN_ADDR: ":9474"
-      RAJOMON_UPSTREAM_ADDR: home-timeline-service:9090
-    ports:
-      - "9474:9474"
-    depends_on:
-      - home-timeline-service
+      - teastore-persistence
 
   # ══════════════════════════════════════════════════════════
-  # Phase 4: Observability stack — Prometheus + Grafana
+  # Observability stack — Prometheus + Grafana
   # ══════════════════════════════════════════════════════════
 
   prometheus:
@@ -195,17 +158,11 @@ services:
       - "--web.console.libraries=/usr/share/prometheus/console_libraries"
       - "--web.console.templates=/usr/share/prometheus/consoles"
     depends_on:
-      - sidecar-compose-post
-      - sidecar-social-graph
-      - sidecar-post-storage
-      - sidecar-user-timeline
-      - sidecar-url-shorten
-      - sidecar-user
-      - sidecar-media
-      - sidecar-text
-      - sidecar-unique-id
-      - sidecar-user-mention
-      - sidecar-home-timeline
+      - sidecar-webui
+      - sidecar-auth
+      - sidecar-imageprovider
+      - sidecar-recommender
+      - sidecar-persistence
 
   grafana:
     image: grafana/grafana:11.1.0
@@ -214,7 +171,7 @@ services:
       - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: rajomon
+      GF_SECURITY_ADMIN_PASSWORD: "${GF_SECURITY_ADMIN_PASSWORD:-rajomon}"
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes:
@@ -224,42 +181,42 @@ services:
       - prometheus
 
   # ══════════════════════════════════════════════════════════
-  # Phase 5: Envoy Gateway — two variants via Compose profiles
+  # Envoy Gateway — two variants via Compose profiles
   #
   # Usage:
-  #   docker compose --profile permissive up -d   (PASS case — tokens survive)
-  #   docker compose --profile hardened  up -d    (FAIL case — tokens stripped)
+  #   docker compose --profile permissive up -d   (PASS — tokens survive)
+  #   docker compose --profile hardened  up -d    (FAIL — tokens stripped)
   #
-  # Both listen on host port 10000 → forward to sidecar-compose-post:9464.
-  # Admin UI available at http://localhost:9901 (both configs).
+  # Both listen on host :10000 → forward to sidecar-webui:9550.
+  # Admin UI at http://localhost:9901
   # ══════════════════════════════════════════════════════════
 
-  # ── Permissive gateway — passes X-Rajomon-Tokens intact ─────────────────────
+  # ── Permissive gateway — passes X-Rajomon-Tokens intact ──
   envoy-permissive:
     image: envoyproxy/envoy:v1.31-latest
     restart: "no"
     profiles:
       - permissive
     ports:
-      - "10000:10000"   # Gateway entry point
-      - "9901:9901"     # Envoy admin UI
+      - "10000:10000"
+      - "9901:9901"
     volumes:
       - ./gateway-config/envoy-permissive.yaml:/etc/envoy/envoy.yaml:ro
     command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
     depends_on:
-      - sidecar-compose-post
+      - sidecar-webui
 
-  # ── Hardened gateway — strips X-Rajomon-Tokens (risk demonstration) ─────────
+  # ── Hardened gateway — strips X-Rajomon-Tokens ───────────
   envoy-hardened:
     image: envoyproxy/envoy:v1.31-latest
     restart: "no"
     profiles:
       - hardened
     ports:
-      - "10000:10000"   # Same gateway port — swap configs by switching profile
-      - "9901:9901"     # Envoy admin UI
+      - "10000:10000"
+      - "9901:9901"
     volumes:
       - ./gateway-config/envoy-hardened.yaml:/etc/envoy/envoy.yaml:ro
     command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
     depends_on:
-      - sidecar-compose-post
+      - sidecar-webui

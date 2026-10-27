@@ -1,14 +1,17 @@
 # ============================================================
-# Prometheus Configuration — Rajomon-HTTP Phase 4
+# Prometheus Configuration — Rajomon-HTTP (TeaStore benchmark)
 #
-# Scrapes /metrics from every sidecar (11 services × port range 9464–9474).
-# All sidecars share the same Docker network (rajomon-http_default), so
-# Prometheus reaches them by container name.
+# Scrapes /metrics from all 5 TeaStore sidecars every 5s.
+# Sidecars are reachable by their sidecar-<name> container name
+# on the rajomon-http_default Docker network.
+#
+# service_name label comes from each sidecar's ConstLabels set
+# in sidecar/metrics.go — drives all Grafana dashboard panels.
 # ============================================================
 
 global:
-  scrape_interval: 5s      # How often to scrape each target
-  evaluation_interval: 5s  # How often to evaluate alerting rules
+  scrape_interval: 5s
+  evaluation_interval: 5s
 
 scrape_configs:
 
@@ -17,21 +20,14 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
-  # ── Rajomon sidecars (one per business-logic service) ──────
-  # Each sidecar exposes /metrics on its own port.
-  # The service_name label comes from the metric ConstLabels set in metrics.go.
+  # ── Rajomon sidecars (one per TeaStore business-logic service)
+  # Ports 9550–9554 map to: webui, auth, imageprovider, recommender, persistence
   - job_name: rajomon_sidecars
+    metrics_path: /metrics
     static_configs:
       - targets:
-          - sidecar-compose-post:9464
-          - sidecar-social-graph:9465
-          - sidecar-post-storage:9466
-          - sidecar-user-timeline:9467
-          - sidecar-url-shorten:9468
-          - sidecar-user:9469
-          - sidecar-media:9470
-          - sidecar-text:9471
-          - sidecar-unique-id:9472
-          - sidecar-user-mention:9473
-          - sidecar-home-timeline:9474
-    metrics_path: /metrics
+          - sidecar-webui:9550
+          - sidecar-auth:9551
+          - sidecar-imageprovider:9552
+          - sidecar-recommender:9553
+          - sidecar-persistence:9554

@@ -33,6 +33,8 @@ func WriteTokenHeader(r *http.Request, remaining int) {
 
 // WritePriceHeader sets X-Rajomon-Price on the response, formatted to 2
 // decimal places, so the caller can observe the price charged at this hop.
-func WritePriceHeader(w http.ResponseWriter, price float64) {
-	w.Header().Set(headerPrice, fmt.Sprintf("%.2f", price))
+// It accepts *http.Response (upstream response) so it can be called from
+// the reverse-proxy ModifyResponse hook — before headers are flushed.
+func WritePriceHeader(resp *http.Response, price float64) {
+	resp.Header.Set(headerPrice, fmt.Sprintf("%.2f", price))
 }

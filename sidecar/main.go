@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -25,7 +26,21 @@ func main() {
 		log.Fatalf("sidecar: invalid RAJOMON_UPSTREAM_ADDR %q: %v", cfg.UpstreamAddr, err)
 	}
 
+	// priceStore maps a per-request context key to the price charged, so ModifyResponse
+	// can inject X-Rajomon-Price before headers are flushed downstream.
+	// We use a context key to carry the price through the request's context,
+	// which survives into the upstream request created by the reverse proxy.
+	type priceKey struct{}
+
 	proxy := httputil.NewSingleHostReverseProxy(upstreamURL)
+	// ModifyResponse is called by the reverse proxy BEFORE writing the upstream
+	// response headers to the client — the correct place to inject our header.
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if v := resp.Request.Context().Value(priceKey{}); v != nil {
+			WritePriceHeader(resp, v.(float64))
+		}
+		return nil
+	}
 
 	mux := http.NewServeMux()
 
@@ -89,8 +104,10 @@ func main() {
 				cfg.ServiceName, r.Method, r.URL.Path, tokens, tokens-int(price), price)
 			pm.RequestsTotal.WithLabelValues("forward").Inc()
 			pm.AdmissionPrice.WithLabelValues("forward").Observe(price)
-			proxy.ServeHTTP(w, r)
-			WritePriceHeader(w, price)
+			// Carry price in the request context so ModifyResponse can inject
+			// X-Rajomon-Price before response headers are flushed to the client.
+			rWithPrice := r.WithContext(context.WithValue(r.Context(), priceKey{}, price))
+			proxy.ServeHTTP(w, rWithPrice)
 
 		case ForwardFailOpen:
 			// Step 4 (fail-open): leave queue, enter in-flight.
@@ -100,8 +117,10 @@ func main() {
 				cfg.ServiceName, r.Method, r.URL.Path, price)
 			pm.RequestsTotal.WithLabelValues("forward_fail_open").Inc()
 			pm.AdmissionPrice.WithLabelValues("forward_fail_open").Observe(price)
-			proxy.ServeHTTP(w, r)
-			WritePriceHeader(w, price)
+			// Carry price in the request context so ModifyResponse can inject
+			// X-Rajomon-Price before response headers are flushed to the client.
+			rWithPrice := r.WithContext(context.WithValue(r.Context(), priceKey{}, price))
+			proxy.ServeHTTP(w, rWithPrice)
 		}
 	})
 

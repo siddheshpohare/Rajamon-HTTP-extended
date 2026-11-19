@@ -68,17 +68,15 @@ function Test-AdmissionEngine {
     $color = if ($code503 -eq "503") { "Green" } else { "Red" }
     Write-Host "             $icon HTTP $code503 (expected 503)" -ForegroundColor $color
 
-    # FAIL-OPEN
-    Write-Host "  [FAIL-OPEN] no token header (should be 200 + X-Rajomon-Price)" -ForegroundColor Yellow
-    $out2  = & $CurlExe -si "$FullUrl"
-    $stat2 = ($out2 | Select-String "^HTTP/").Line
-    $pri2  = ($out2 | Select-String "x-rajomon-price" -CaseSensitive:$false).Line
+    # REJECT MISSING TOKENS (strict admission — was fail-open)
+    Write-Host "  [REJECT-MISSING] no token header (should be 401 — strict admission)" -ForegroundColor Yellow
+    $out2   = & $CurlExe -si "$FullUrl"
+    $stat2  = ($out2 | Select-String "^HTTP/").Line
+    $code401 = ($stat2 -replace "^HTTP/\S+\s+(\d+).*", '$1').Trim()
+    $icon2  = if ($code401 -eq "401") { "[PASS]" } else { "[FAIL]" }
+    $color2 = if ($code401 -eq "401") { "Green" } else { "Red" }
     Write-Host "             Status : $($stat2.Trim())"
-    if ($pri2) {
-        Write-Host "             $($pri2.Trim())" -ForegroundColor Green
-    } else {
-        Write-Host "             X-Rajomon-Price: MISSING [BUG]" -ForegroundColor Red
-    }
+    Write-Host "             $icon2 HTTP $code401 (expected 401)" -ForegroundColor $color2
 }
 
 function Test-HeaderSurvival {
@@ -134,8 +132,8 @@ function Test-LoadRejection {
 }
 
 function Test-LoadNoTokens {
-    Write-Header "T8 - Fail-Open Load (no tokens header, $ConnNorm conn, $Duration)"
-    Write-Host "  [SHOULD SEE: 200s — sidecar forwards in fail-open mode]" -ForegroundColor Yellow
+    Write-Header "T8 - Missing-Token Rejection Load (no token header, $ConnNorm conn, $Duration)"
+    Write-Host "  [SHOULD SEE: 401s — sidecar rejects requests with missing token budgets]" -ForegroundColor Yellow
     Run-WrkLoad "failopen" $ConnNorm ""
 }
 

@@ -19,7 +19,7 @@ func TestDecide(t *testing.T) {
 			tokens:   0,
 			tokensOK: false,
 			price:    1.0,
-			want:     ForwardFailOpen,
+			want:     RejectMissingTokens,
 		},
 		// Row 2: tokens present, tokens >= price → Forward
 		{
@@ -57,7 +57,7 @@ func TestDecide(t *testing.T) {
 			tokens:   0,
 			tokensOK: false,
 			price:    0.0,
-			want:     ForwardFailOpen,
+			want:     RejectMissingTokens,
 		},
 	}
 
@@ -72,8 +72,8 @@ func TestDecide(t *testing.T) {
 	}
 }
 
-// TestGetLocalPrice verifies that GetLocalPrice uses queue depth (not in-flight)
-// as its congestion signal, and that the formula is correct.
+// TestGetLocalPrice verifies that GetLocalPrice uses queued plus in-flight
+// requests as its congestion signal.
 func TestGetLocalPrice(t *testing.T) {
 	cfg := SidecarConfig{
 		BasePrice:        1.0,
@@ -81,10 +81,10 @@ func TestGetLocalPrice(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		queued     int64
-		inFlight   int64
-		wantPrice  float64
+		name      string
+		queued    int64
+		inFlight  int64
+		wantPrice float64
 	}{
 		{
 			name:      "zero queue, zero in-flight → base price only",
@@ -102,13 +102,13 @@ func TestGetLocalPrice(t *testing.T) {
 			name:      "queue=0, in-flight=10 → price NOT driven by in-flight",
 			queued:    0,
 			inFlight:  10,
-			wantPrice: 1.0, // in-flight does NOT affect price
+			wantPrice: 6.0, // 1.0 + 0.5*10
 		},
 		{
 			name:      "queue=10, in-flight=3 → only queue matters",
 			queued:    10,
 			inFlight:  3,
-			wantPrice: 6.0, // 1.0 + 0.5*10
+			wantPrice: 7.5, // 1.0 + 0.5*(10+3)
 		},
 		{
 			name:      "negative queued (transient underflow) → clamped to base price",
@@ -130,6 +130,34 @@ func TestGetLocalPrice(t *testing.T) {
 					got, tt.wantPrice, tt.queued, tt.inFlight)
 			}
 		})
+	}
+}
+
+func TestAdmissionCost(t *testing.T) {
+	tests := []struct {
+		price float64
+		want  int
+	}{
+		{price: 0, want: 0},
+		{price: 1, want: 1},
+		{price: 1.01, want: 2},
+		{price: 1.5, want: 2},
+		{price: 2, want: 2},
+	}
+
+	for _, tt := range tests {
+		if got := AdmissionCost(tt.price); got != tt.want {
+			t.Errorf("AdmissionCost(%.2f) = %d, want %d", tt.price, got, tt.want)
+		}
+	}
+}
+
+func TestFractionalPriceRequiresCeilingTokenCost(t *testing.T) {
+	if got := Decide(1, true, 1.5); got != RejectInsufficientTokens {
+		t.Errorf("Decide(1, true, 1.5) = %v, want RejectInsufficientTokens", got)
+	}
+	if got := Decide(2, true, 1.5); got != Forward {
+		t.Errorf("Decide(2, true, 1.5) = %v, want Forward", got)
 	}
 }
 

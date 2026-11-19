@@ -59,19 +59,19 @@ func main() {
 
 	// Catch-all — admission engine + reverse proxy.
 	//
-	// Request lifecycle (queue-depth congestion signal):
+	// Request lifecycle (combined queued and in-flight congestion signal):
 	//
 	//  1. EnqueueRequest()   — request arrives; queue depth rises by 1.
-	//  2. GetLocalPrice()    — price = BasePrice + Scale × queue_depth.
+	//  2. GetLocalPrice()    — price = BasePrice + Scale × (queued + in-flight).
 	//                          Price is computed AFTER enqueueing so this
 	//                          request's own weight is included in the signal.
-	//  3. Decide()           — Forward / RejectInsufficientTokens / ForwardFailOpen.
+	//  3. Decide()           — Forward / RejectInsufficientTokens / RejectMissingTokens.
 	//
 	//  REJECT path:
 	//  4. CancelRequest()    — removes request from queue (never enters in-flight).
 	//     Returns 503 immediately; upstream never touched.
 	//
-	//  FORWARD / FAIL-OPEN path:
+	//  FORWARD path:
 	//  4. DequeueRequest()   — atomically moves request from queue → in-flight.
 	//  5. defer CompleteRequest() — decrements in-flight when upstream responds.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -79,8 +79,9 @@ func main() {
 		metrics.EnqueueRequest()
 
 		tokens, tokensOK := ReadTokenHeader(r)
-		// Step 2: price computed from current queue depth (this request is included)
+		// Step 2: price computed from current active load (this request is included)
 		price := GetLocalPrice(cfg, metrics)
+		cost := AdmissionCost(price)
 		verdict := Decide(tokens, tokensOK, price)
 
 		switch verdict {
@@ -88,20 +89,29 @@ func main() {
 		case RejectInsufficientTokens:
 			// Step 4 (reject): undo the enqueue — request never forwarded.
 			metrics.CancelRequest()
-			log.Printf("sidecar[%s]: REJECT %s %s tokens=%d price=%.2f",
-				cfg.ServiceName, r.Method, r.URL.Path, tokens, price)
+			log.Printf("sidecar[%s]: REJECT insufficient-tokens %s %s tokens=%d cost=%d price=%.2f",
+				cfg.ServiceName, r.Method, r.URL.Path, tokens, cost, price)
 			pm.RequestsTotal.WithLabelValues("reject_insufficient_tokens").Inc()
 			pm.AdmissionPrice.WithLabelValues("reject_insufficient_tokens").Observe(price)
 			http.Error(w, "rajomon-http: insufficient tokens for current price",
 				http.StatusServiceUnavailable)
 
+		case RejectMissingTokens:
+			metrics.CancelRequest()
+			log.Printf("sidecar[%s]: REJECT missing-or-invalid-tokens %s %s price=%.2f",
+				cfg.ServiceName, r.Method, r.URL.Path, price)
+			pm.RequestsTotal.WithLabelValues("reject_missing_tokens").Inc()
+			pm.AdmissionPrice.WithLabelValues("reject_missing_tokens").Observe(price)
+			http.Error(w, "rajomon-http: missing or invalid token budget",
+				http.StatusUnauthorized)
+
 		case Forward:
 			// Step 4 (forward): leave queue, enter in-flight.
 			metrics.DequeueRequest()
 			defer metrics.CompleteRequest()
-			WriteTokenHeader(r, tokens-int(price))
+			WriteTokenHeader(r, tokens-cost)
 			log.Printf("sidecar[%s]: FORWARD %s %s tokens=%d→%d price=%.2f",
-				cfg.ServiceName, r.Method, r.URL.Path, tokens, tokens-int(price), price)
+				cfg.ServiceName, r.Method, r.URL.Path, tokens, tokens-cost, price)
 			pm.RequestsTotal.WithLabelValues("forward").Inc()
 			pm.AdmissionPrice.WithLabelValues("forward").Observe(price)
 			// Carry price in the request context so ModifyResponse can inject
@@ -109,22 +119,10 @@ func main() {
 			rWithPrice := r.WithContext(context.WithValue(r.Context(), priceKey{}, price))
 			proxy.ServeHTTP(w, rWithPrice)
 
-		case ForwardFailOpen:
-			// Step 4 (fail-open): leave queue, enter in-flight.
-			metrics.DequeueRequest()
-			defer metrics.CompleteRequest()
-			log.Printf("sidecar[%s]: FAIL-OPEN %s %s price=%.2f",
-				cfg.ServiceName, r.Method, r.URL.Path, price)
-			pm.RequestsTotal.WithLabelValues("forward_fail_open").Inc()
-			pm.AdmissionPrice.WithLabelValues("forward_fail_open").Observe(price)
-			// Carry price in the request context so ModifyResponse can inject
-			// X-Rajomon-Price before response headers are flushed to the client.
-			rWithPrice := r.WithContext(context.WithValue(r.Context(), priceKey{}, price))
-			proxy.ServeHTTP(w, rWithPrice)
 		}
 	})
 
-	log.Printf("sidecar[%s]: listening on %s, upstream %s (base_price=%.2f scale=%.2f, signal=queue_depth)",
+	log.Printf("sidecar[%s]: listening on %s, upstream %s (base_price=%.2f scale=%.2f, signal=queued_plus_in_flight)",
 		cfg.ServiceName, cfg.ListenAddr, cfg.UpstreamAddr,
 		cfg.BasePrice, cfg.PriceScaleFactor)
 

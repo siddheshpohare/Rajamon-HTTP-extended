@@ -10,7 +10,7 @@ import (
 // scrape all sidecars and distinguish them in queries.
 type SidecarMetrics struct {
 	// RequestsTotal counts every request processed, partitioned by verdict.
-	// Verdicts: "forward", "forward_fail_open", "reject_insufficient_tokens"
+	// Verdicts: "forward", "reject_insufficient_tokens", "reject_missing_tokens"
 	RequestsTotal *prometheus.CounterVec
 
 	// QueuedRequests is the current number of requests waiting in the sidecar's
@@ -71,7 +71,7 @@ func NewSidecarMetrics(serviceName string) *SidecarMetrics {
 				Namespace:   "rajomon",
 				Subsystem:   "sidecar",
 				Name:        "admission_price",
-				Help:        "Price charged at the moment of each admission decision (driven by queue depth).",
+				Help:        "Price charged at the moment of each admission decision (driven by queued plus in-flight load).",
 				ConstLabels: labels,
 				// Buckets cover base_price (1.0) up through high-load prices
 				Buckets: []float64{0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 20.0, 50.0},

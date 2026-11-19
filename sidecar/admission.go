@@ -1,37 +1,49 @@
 package main
 
+import "math"
+
 // Verdict is the result of the admission decision for a single request.
 type Verdict int
 
 const (
-	// Forward: tokens present and tokens >= price.
-	// Deduct price, proxy the request, attach price header to response.
+	// Forward: tokens are present and cover the integer admission cost.
 	Forward Verdict = iota
 
-	// RejectInsufficientTokens: tokens present but tokens < price.
+	// RejectInsufficientTokens: a valid token budget cannot cover the cost.
 	// Respond immediately with 503 — upstream is never touched.
 	RejectInsufficientTokens
 
-	// ForwardFailOpen: no X-Rajomon-Tokens header (or unparseable).
-	// Proxy the request unchanged (no token accounting), still attach price header.
-	ForwardFailOpen
+	// RejectMissingTokens: the token header is missing or malformed. This
+	// prevents a request whose header was stripped by a gateway from reaching
+	// the protected upstream.
+	RejectMissingTokens
 )
 
-// Decide implements the Phase 3 Decision Table exactly as specified:
+// Decide implements strict admission:
 //
 //	tokens present & valid? | tokens vs. price | Verdict                  | Upstream touched?
 //	------------------------|------------------|--------------------------|------------------
-//	No                      | —                | ForwardFailOpen          | Yes
-//	Yes                     | tokens >= price  | Forward                  | Yes
-//	Yes                     | tokens < price   | RejectInsufficientTokens | No
+//	No                      | —                | RejectMissingTokens      | No
+//	Yes                     | tokens >= cost   | Forward                  | Yes
+//	Yes                     | tokens < cost    | RejectInsufficientTokens | No
 //
-// Do not add additional cases or thresholds not listed in the table above.
+// Cost is ceil(price), so integer token budgets never underpay a fractional
+// congestion price.
 func Decide(tokens int, tokensOK bool, price float64) Verdict {
 	if !tokensOK {
-		return ForwardFailOpen
+		return RejectMissingTokens
 	}
-	if float64(tokens) >= price {
+	if tokens >= AdmissionCost(price) {
 		return Forward
 	}
 	return RejectInsufficientTokens
+}
+
+// AdmissionCost converts the local floating-point price to the integer token
+// charge used for both the admission check and deduction.
+func AdmissionCost(price float64) int {
+	if price <= 0 {
+		return 0
+	}
+	return int(math.Ceil(price))
 }

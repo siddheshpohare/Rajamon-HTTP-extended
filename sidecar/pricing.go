@@ -7,10 +7,9 @@ import (
 // Metrics holds the per-sidecar runtime counters used for price computation.
 // All fields are accessed atomically so the struct is safe for concurrent use.
 //
-// Congestion signal: queue depth — the number of requests that have arrived at
-// this sidecar's handler but have not yet started being proxied to the upstream.
-// This is a tighter signal than raw in-flight count because it directly measures
-// backpressure: a growing queue means the upstream is slower than arrival rate.
+// Congestion signal: active load — queued plus in-flight requests. Queue depth
+// captures arrivals waiting to be proxied, while in-flight requests capture work
+// the upstream service is still processing.
 //
 // How it works:
 //   - Queued is incremented when a request enters the handler (before admission).
@@ -18,8 +17,7 @@ import (
 //     passes admission and starts being forwarded to the upstream.
 //   - InFlight is decremented (via defer) when the upstream response returns.
 //
-// This gives:  queue_depth = Queued  (waiting for upstream capacity)
-//              in_flight   = InFlight (actively being proxied)
+// This gives: active_load = Queued + InFlight.
 //
 // pm is the Prometheus SidecarMetrics used to mirror every counter change
 // into Prometheus instruments so /metrics serves live data.
@@ -70,17 +68,18 @@ func (m *Metrics) CancelRequest() {
 
 // GetLocalPrice returns the current admission price for this service instance:
 //
-//	price = BasePrice + PriceScaleFactor × queue_depth
+//	price = BasePrice + PriceScaleFactor × (queue_depth + in_flight)
 //
-// Queue depth is the congestion signal: it measures how many requests are
-// waiting to be forwarded. A non-zero queue means the upstream is already
-// saturated — the price rises to deter further arrivals, shedding load
-// before it accumulates. This is a more direct overload signal than raw
-// in-flight count because it captures backpressure, not just concurrency.
+// The combined signal remains elevated while an upstream call is still running,
+// so the sidecar responds to service traffic instead of only handler overlap.
 func GetLocalPrice(cfg SidecarConfig, m *Metrics) float64 {
 	queued := atomic.LoadInt64(&m.Queued)
+	inFlight := atomic.LoadInt64(&m.InFlight)
 	if queued < 0 {
 		queued = 0 // guard against transient underflow during startup
 	}
-	return cfg.BasePrice + cfg.PriceScaleFactor*float64(queued)
+	if inFlight < 0 {
+		inFlight = 0 // guard against transient underflow during shutdown
+	}
+	return cfg.BasePrice + cfg.PriceScaleFactor*float64(queued+inFlight)
 }

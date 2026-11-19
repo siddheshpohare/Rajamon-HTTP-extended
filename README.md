@@ -164,11 +164,11 @@ Rajamon-HTTP/
 
 | Tokens present & valid? | Tokens vs. price | Verdict | Upstream touched? |
 |------------------------|-----------------|---------|------------------|
-| No | — | `ForwardFailOpen` | Yes |
-| Yes | tokens ≥ price | `Forward` | Yes |
-| Yes | tokens < price | `RejectInsufficientTokens` | No (503 returned immediately) |
+| No or invalid | — | `RejectMissingTokens` | No (401 returned immediately) |
+| Yes | tokens ≥ ceil(price) | `Forward` | Yes |
+| Yes | tokens < ceil(price) | `RejectInsufficientTokens` | No (503 returned immediately) |
 
-Token flow: `X-Rajomon-Tokens` travels **forward** on the request (remaining budget).  
+Token flow: `X-Rajomon-Tokens` travels **forward** on the request (remaining budget after deducting `ceil(price)`).  
 Price flow: `X-Rajomon-Price` travels **back** on the response (congestion signal).
 
 ---

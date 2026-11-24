@@ -1,0 +1,65 @@
+################################################################################
+# Rajomon-HTTP — Envoy Gateway (PERMISSIVE config) — TeaStore
+#
+# Behaviour: forwards ALL request headers unchanged to sidecar-webui:9550.
+# X-Rajomon-Tokens is NOT removed — the token travels intact through the gateway.
+#
+# Expected header-survival-check result: PASS
+# Flow: Client → Envoy :10000 → sidecar-webui :9550 → teastore-webui-upstream
+################################################################################
+
+static_resources:
+
+  listeners:
+    - name: rajomon_gateway
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 10000
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: rajomon_gateway
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                # ── NO header manipulation — everything passes through intact ──
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                route_config:
+                  name: rajomon_routes
+                  virtual_hosts:
+                    - name: rajomon_backend
+                      domains: ["*"]
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: sidecar_webui
+                            timeout: 15s
+
+  clusters:
+    - name: sidecar_webui
+      connect_timeout: 1s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: sidecar_webui
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: sidecar-webui
+                      port_value: 9550
+
+admin:
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901

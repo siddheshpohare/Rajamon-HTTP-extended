@@ -79,6 +79,10 @@ func main() {
 		metrics.EnqueueRequest()
 
 		tokens, tokensOK := ReadTokenHeader(r)
+		// Internal sidecars: header-less calls (TeaStore does not forward the
+		// header) get the configured default budget. Entry sidecar: default 0.
+		headerPresent := r.Header.Get(headerTokens) != ""
+		tokens, tokensOK = ResolveTokens(headerPresent, tokens, tokensOK, cfg.InternalDefaultTokens)
 		// Step 2: price computed from current active load (this request is included)
 		price := GetLocalPrice(cfg, metrics)
 		cost := AdmissionCost(price)

@@ -14,12 +14,14 @@
 #   teastore-recommender  — Recommender (:8080)
 #   teastore-persistence  — Persistence layer (:8080)
 #
-# NOTE: The real service containers use internal hostnames
-#       (teastore-*-upstream) so that sidecars can take over
-#       the public DNS name (teastore-*) via network aliases.
-#       This is defined in the root docker-compose.yml.
-#       In standalone mode (no sidecars), rename these aliases
-#       back to the plain service names.
+# NOTE: The real service containers are named teastore-*-upstream. Auth,
+#       ImageProvider, Recommender and Persistence register themselves in the
+#       TeaStore registry as their SIDECAR (HOST_NAME=teastore-<name>,
+#       SERVICE_PORT=955x), so peers call the sidecar, which forwards to the
+#       real container on :8080. The WebUI is the entry point (sidecar-webui
+#       :9550) and is also published on host :8080 for baseline runs.
+#       In standalone mode (no sidecars), set HOST_NAME back to the real
+#       service name and drop SERVICE_PORT.
 # ============================================================
 
 services:
@@ -52,7 +54,7 @@ services:
   # sidecar-webui:9550 which forwards here.
   # Hostname is teastore-webui-upstream so the sidecar can
   # claim the teastore-webui alias (see root docker-compose.yml).
-  teastore-webui:
+  teastore-webui-upstream:
     image: descartesresearch/teastore-webui:latest
     hostname: teastore-webui-upstream
     restart: "no"
@@ -67,12 +69,13 @@ services:
       - teastore-registry
 
   # ── Auth Service ─────────────────────────────────────────
-  teastore-auth:
+  teastore-auth-upstream:
     image: descartesresearch/teastore-auth:latest
     hostname: teastore-auth-upstream
     restart: "no"
     environment:
-      HOST_NAME: "teastore-auth-upstream"
+      HOST_NAME: "teastore-auth"
+      SERVICE_PORT: "9551"
       REGISTRY_HOST: "teastore-registry"
       REGISTRY_PORT: "8080"
     depends_on:
@@ -80,12 +83,13 @@ services:
       - teastore-db
 
   # ── Image Provider ───────────────────────────────────────
-  teastore-imageprovider:
+  teastore-imageprovider-upstream:
     image: descartesresearch/teastore-image:latest
     hostname: teastore-imageprovider-upstream
     restart: "no"
     environment:
-      HOST_NAME: "teastore-imageprovider-upstream"
+      HOST_NAME: "teastore-imageprovider"
+      SERVICE_PORT: "9552"
       REGISTRY_HOST: "teastore-registry"
       REGISTRY_PORT: "8080"
       PRELOAD_IMAGES: "false"
@@ -93,12 +97,13 @@ services:
       - teastore-registry
 
   # ── Recommender ──────────────────────────────────────────
-  teastore-recommender:
+  teastore-recommender-upstream:
     image: descartesresearch/teastore-recommender:latest
     hostname: teastore-recommender-upstream
     restart: "no"
     environment:
-      HOST_NAME: "teastore-recommender-upstream"
+      HOST_NAME: "teastore-recommender"
+      SERVICE_PORT: "9553"
       REGISTRY_HOST: "teastore-registry"
       REGISTRY_PORT: "8080"
     depends_on:
@@ -109,12 +114,13 @@ services:
   # Database abstraction layer — all services go through here
   # to reach teastore-db. This is the most contention-prone
   # service under load — ideal for admission control testing.
-  teastore-persistence:
+  teastore-persistence-upstream:
     image: descartesresearch/teastore-persistence:latest
     hostname: teastore-persistence-upstream
     restart: "no"
     environment:
-      HOST_NAME: "teastore-persistence-upstream"
+      HOST_NAME: "teastore-persistence"
+      SERVICE_PORT: "9554"
       REGISTRY_HOST: "teastore-registry"
       REGISTRY_PORT: "8080"
       DB_HOST: "teastore-db"

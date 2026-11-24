@@ -13,9 +13,9 @@ func TestDecide(t *testing.T) {
 		price    float64
 		want     Verdict
 	}{
-		// Row 1: No header → fail-open (upstream touched, no accounting)
+		// Row 1: No header → strict reject (401, upstream never touched)
 		{
-			name:     "no token header → ForwardFailOpen",
+			name:     "no token header → RejectMissingTokens",
 			tokens:   0,
 			tokensOK: false,
 			price:    1.0,
@@ -51,9 +51,9 @@ func TestDecide(t *testing.T) {
 			price:    10.0,
 			want:     RejectInsufficientTokens,
 		},
-		// Edge: fail-open even when token value happens to be 0
+		// Edge: still rejected as missing even when the token value happens to be 0
 		{
-			name:     "missing header with zero-value token → ForwardFailOpen",
+			name:     "missing header with zero-value token → RejectMissingTokens",
 			tokens:   0,
 			tokensOK: false,
 			price:    0.0,
@@ -99,13 +99,13 @@ func TestGetLocalPrice(t *testing.T) {
 			wantPrice: 2.0, // 1.0 + 0.5*2
 		},
 		{
-			name:      "queue=0, in-flight=10 → price NOT driven by in-flight",
+			name:      "queue=0, in-flight=10 → price driven by in-flight",
 			queued:    0,
 			inFlight:  10,
 			wantPrice: 6.0, // 1.0 + 0.5*10
 		},
 		{
-			name:      "queue=10, in-flight=3 → only queue matters",
+			name:      "queue=10, in-flight=3 → price driven by queue + in-flight",
 			queued:    10,
 			inFlight:  3,
 			wantPrice: 7.5, // 1.0 + 0.5*(10+3)
@@ -207,4 +207,31 @@ func TestMetricsLifecycle(t *testing.T) {
 			t.Errorf("Queued=%d InFlight=%d, want 3,2", m.Queued, m.InFlight)
 		}
 	})
+}
+
+// TestResolveTokens covers the internal default budget used by the four
+// non-entry sidecars (TeaStore does not forward X-Rajomon-Tokens).
+func TestResolveTokens(t *testing.T) {
+	tests := []struct {
+		name          string
+		headerPresent bool
+		tokens        int
+		ok            bool
+		def           int
+		wantTokens    int
+		wantOK        bool
+	}{
+		{"valid header is untouched", true, 7, true, 20, 7, true},
+		{"absent header, default 20 -> 20", false, 0, false, 20, 20, true},
+		{"absent header, no default (entry sidecar) -> stays invalid", false, 0, false, 0, 0, false},
+		{"malformed header is never defaulted", true, 0, false, 20, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotT, gotOK := ResolveTokens(tt.headerPresent, tt.tokens, tt.ok, tt.def)
+			if gotT != tt.wantTokens || gotOK != tt.wantOK {
+				t.Errorf("ResolveTokens() = (%d,%v), want (%d,%v)", gotT, gotOK, tt.wantTokens, tt.wantOK)
+			}
+		})
+	}
 }

@@ -86,8 +86,8 @@ function Test-HeaderSurvival {
     $status = ($out | Select-String "^HTTP/").Line
     Write-Host "  Gateway URL  : $gwUrl"
     Write-Host "  Response     : $($status.Trim())"
-    # Check sidecar log for FORWARD (not FAIL-OPEN) to confirm header survived
-    $log = docker compose logs --tail=3 sidecar-webui 2>&1 | Select-String "FORWARD|FAIL-OPEN" | Select-Object -Last 1
+    # Check sidecar log for FORWARD (not REJECT missing-or-invalid-tokens) to confirm header survived
+    $log = docker compose logs --tail=3 sidecar-webui 2>&1 | Select-String "FORWARD|REJECT" | Select-Object -Last 1
     if ($log -match "FORWARD.*tokens=") {
         Write-Host "  Log confirms : [PASS] FORWARD (header survived gateway hop)" -ForegroundColor Green
     } else {
@@ -121,7 +121,7 @@ function Test-LoadNormal {
 
 function Test-LoadSpike {
     Write-Header "T6 - SPIKE Load ($ConnSpike conn, tokens=$Tokens, $Duration)"
-    Write-Host "  [HIGH CONCURRENCY — watch admission engine respond to queue depth]" -ForegroundColor Yellow
+    Write-Host "  [HIGH CONCURRENCY — watch price rise with queued + in-flight load]" -ForegroundColor Yellow
     Run-WrkLoad "spike" $ConnSpike "-H `"X-Rajomon-Tokens: $Tokens`""
 }
 
@@ -134,12 +134,12 @@ function Test-LoadRejection {
 function Test-LoadNoTokens {
     Write-Header "T8 - Missing-Token Rejection Load (no token header, $ConnNorm conn, $Duration)"
     Write-Host "  [SHOULD SEE: 401s — sidecar rejects requests with missing token budgets]" -ForegroundColor Yellow
-    Run-WrkLoad "failopen" $ConnNorm ""
+    Run-WrkLoad "missing-token" $ConnNorm ""
 }
 
 function Show-SidecarStats {
     Write-Header "T9 - Post-Load Sidecar Log Summary"
-    docker compose logs --tail=20 sidecar-webui 2>&1 | Select-String "FORWARD|REJECT|FAIL-OPEN" | Select-Object -Last 10
+    docker compose logs --tail=20 sidecar-webui 2>&1 | Select-String "FORWARD|REJECT" | Select-Object -Last 10
 }
 
 # ─── MAIN ────────────────────────────────────────────────────────────────────

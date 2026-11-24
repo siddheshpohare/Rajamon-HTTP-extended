@@ -38,8 +38,8 @@ $out2 = & $CurlExe -si -H "X-Rajomon-Tokens: 0" $Base
 
 Write-Host ""
 
-# 3. FAIL-OPEN
-Write-Host "[3] FAIL-OPEN (no token header)" -ForegroundColor Yellow
+# 3. REJECT MISSING TOKEN
+Write-Host "[3] REJECT-MISSING (no token header, expect 401)" -ForegroundColor Yellow
 $out3 = & $CurlExe -si $Base
 ($out3 | Select-String "^HTTP/|x-rajomon" -CaseSensitive:$false) | ForEach-Object { Write-Host "     $_" }
 

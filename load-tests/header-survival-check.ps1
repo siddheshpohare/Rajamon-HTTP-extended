@@ -41,5 +41,5 @@ docker compose logs --tail=10 $SidecarLogs
 Write-Host ""
 Write-Host "--- Interpretation ---" -ForegroundColor Cyan
 Write-Host "  FORWARD  tokens=... → header survived the gateway hop (PASS)"
-Write-Host "  FAIL-OPEN           → header was stripped by gateway (FAIL — hardened profile)"
+Write-Host "  REJECT missing-or-invalid-tokens (401) → header was stripped by gateway (FAIL — hardened profile)"
 Write-Host ""

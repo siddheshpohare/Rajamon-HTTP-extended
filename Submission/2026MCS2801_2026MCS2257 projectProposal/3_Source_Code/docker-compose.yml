@@ -1,0 +1,239 @@
+# ============================================================
+# Rajomon-HTTP — Top-Level Orchestration
+#
+# Benchmark: TeaStore (REST/HTTP — all services speak HTTP/1.1)
+# Previous benchmark: DeathStarBench Social Network (removed —
+#   used Apache Thrift binary RPC on port 9090, incompatible
+#   with an HTTP reverse-proxy sidecar).
+#
+# Architecture:
+#   Client → Envoy Gateway (:10000)
+#          → sidecar-webui (:9550)       ← entry hop: strict admission
+#          → teastore-webui-upstream:8080 ← real app (unmodified)
+#   WebUI → registry lookup → teastore-<name>:<955x> = the sidecar
+#          → sidecar-auth/-imageprovider/-recommender/-persistence
+#          → teastore-<name>-upstream:8080 (real service, unmodified)
+#
+# How internal calls reach the sidecars (configuration only, no TeaStore code):
+#   TeaStore services register HOST_NAME:SERVICE_PORT with the registry and peers
+#   call whatever is registered. benchmark-app/docker-compose.yml registers each
+#   internal service as its SIDECAR (teastore-<name>:955x). The real containers
+#   are named teastore-<name>-upstream so the plain name belongs only to the
+#   sidecar's network alias.
+#
+# Budget on internal hops:
+#   TeaStore does not copy X-Rajomon-Tokens onto its own outgoing calls, so
+#   internal sidecars set RAJOMON_INTERNAL_DEFAULT_TOKENS (default 20) as the
+#   budget for header-less calls. The entry sidecar leaves it unset and keeps
+#   strict 401. A malformed header is always rejected. Budgets are therefore
+#   per-service, not one shrinking end-to-end budget (future work: propagate it,
+#   e.g. via OpenTelemetry baggage). Only trusted-network callers should be able
+#   to reach ports 9551-9554 directly.
+#
+# The WebUI is also published on host :8080 for baseline runs.
+#
+# Profiles:
+#   (default)          — benchmark + sidecars + monitoring
+#   --profile permissive  — add Envoy (passes X-Rajomon-Tokens intact)
+#   --profile hardened    — add Envoy (strips X-Rajomon-Tokens)
+# ============================================================
+
+include:
+  - path: benchmark-app/docker-compose.yml
+
+# ── Shared sidecar template ───────────────────────────────────────────────────
+# All sidecars use the same image (built once from ./sidecar).
+# Service-specific env vars and network aliases differ per instance.
+x-sidecar-defaults: &sidecar-defaults
+  build:
+    context: ./sidecar
+    dockerfile: Dockerfile
+  restart: "no"
+  environment: &sidecar-env
+    RAJOMON_BASE_PRICE: "${RAJOMON_BASE_PRICE:-1.0}"
+    RAJOMON_PRICE_SCALE_FACTOR: "${RAJOMON_PRICE_SCALE_FACTOR:-0.5}"
+
+services:
+
+  # ══════════════════════════════════════════════════════════
+  # Sidecars — one per TeaStore business-logic service
+  #
+  # Each sidecar:
+  #   1. Listens under the real service DNS name (network alias)
+  #   2. Forwards to <service>-upstream:8080 (hidden real container)
+  #   3. Runs admission: read X-Rajomon-Tokens, compute price,
+  #      forward or 503, write X-Rajomon-Price on response
+  # ══════════════════════════════════════════════════════════
+
+  # ── Web UI sidecar ───────────────────────────────────────
+  # Entry-point sidecar. Envoy forwards here. Strict: no header -> 401.
+  sidecar-webui:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: webui
+      RAJOMON_LISTEN_ADDR: ":9550"
+      RAJOMON_UPSTREAM_ADDR: "teastore-webui-upstream:8080"
+    ports:
+      - "9550:9550"
+    networks:
+      default:
+        aliases:
+          - teastore-webui    # ← DNS alias; WebUI itself still registers as teastore-webui-upstream
+    depends_on:
+      - teastore-webui-upstream
+
+  # ── Auth sidecar ─────────────────────────────────────────
+  sidecar-auth:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: auth
+      RAJOMON_INTERNAL_DEFAULT_TOKENS: "${RAJOMON_INTERNAL_DEFAULT_TOKENS:-20}"
+      RAJOMON_LISTEN_ADDR: ":9551"
+      RAJOMON_UPSTREAM_ADDR: "teastore-auth-upstream:8080"
+    ports:
+      - "9551:9551"
+    networks:
+      default:
+        aliases:
+          - teastore-auth
+    depends_on:
+      - teastore-auth-upstream
+
+  # ── Image Provider sidecar ───────────────────────────────
+  sidecar-imageprovider:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: imageprovider
+      RAJOMON_INTERNAL_DEFAULT_TOKENS: "${RAJOMON_INTERNAL_DEFAULT_TOKENS:-20}"
+      RAJOMON_LISTEN_ADDR: ":9552"
+      RAJOMON_UPSTREAM_ADDR: "teastore-imageprovider-upstream:8080"
+    ports:
+      - "9552:9552"
+    networks:
+      default:
+        aliases:
+          - teastore-imageprovider
+    depends_on:
+      - teastore-imageprovider-upstream
+
+  # ── Recommender sidecar ──────────────────────────────────
+  sidecar-recommender:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: recommender
+      RAJOMON_INTERNAL_DEFAULT_TOKENS: "${RAJOMON_INTERNAL_DEFAULT_TOKENS:-20}"
+      RAJOMON_LISTEN_ADDR: ":9553"
+      RAJOMON_UPSTREAM_ADDR: "teastore-recommender-upstream:8080"
+    ports:
+      - "9553:9553"
+    networks:
+      default:
+        aliases:
+          - teastore-recommender
+    depends_on:
+      - teastore-recommender-upstream
+
+  # ── Persistence sidecar ──────────────────────────────────
+  # Persistence handles all DB reads/writes. Registered in the TeaStore
+  # registry as teastore-persistence:9554, so every internal caller goes
+  # through this sidecar.
+  sidecar-persistence:
+    <<: *sidecar-defaults
+    environment:
+      <<: *sidecar-env
+      RAJOMON_SERVICE_NAME: persistence
+      RAJOMON_INTERNAL_DEFAULT_TOKENS: "${RAJOMON_INTERNAL_DEFAULT_TOKENS:-20}"
+      RAJOMON_LISTEN_ADDR: ":9554"
+      RAJOMON_UPSTREAM_ADDR: "teastore-persistence-upstream:8080"
+    ports:
+      - "9554:9554"
+    networks:
+      default:
+        aliases:
+          - teastore-persistence
+    depends_on:
+      - teastore-persistence-upstream
+
+  # ══════════════════════════════════════════════════════════
+  # Observability stack — Prometheus + Grafana
+  # ══════════════════════════════════════════════════════════
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: "no"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    depends_on:
+      - sidecar-webui
+      - sidecar-auth
+      - sidecar-imageprovider
+      - sidecar-recommender
+      - sidecar-persistence
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: "no"
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: "${GF_SECURITY_ADMIN_PASSWORD:-rajomon}"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
+  # ══════════════════════════════════════════════════════════
+  # Envoy Gateway — two variants via Compose profiles
+  #
+  # Usage:
+  #   docker compose --profile permissive up -d   (PASS — tokens survive)
+  #   docker compose --profile hardened  up -d    (FAIL — tokens stripped)
+  #
+  # Both listen on host :10000 → forward to sidecar-webui:9550.
+  # Admin UI at http://localhost:9901
+  # ══════════════════════════════════════════════════════════
+
+  # ── Permissive gateway — passes X-Rajomon-Tokens intact ──
+  envoy-permissive:
+    image: envoyproxy/envoy:v1.31-latest
+    restart: "no"
+    profiles:
+      - permissive
+    ports:
+      - "10000:10000"
+      - "9901:9901"
+    volumes:
+      - ./gateway-config/envoy-permissive.yaml:/etc/envoy/envoy.yaml:ro
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+    depends_on:
+      - sidecar-webui
+
+  # ── Hardened gateway — strips X-Rajomon-Tokens ───────────
+  envoy-hardened:
+    image: envoyproxy/envoy:v1.31-latest
+    restart: "no"
+    profiles:
+      - hardened
+    ports:
+      - "10000:10000"
+      - "9901:9901"
+    volumes:
+      - ./gateway-config/envoy-hardened.yaml:/etc/envoy/envoy.yaml:ro
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "info"]
+    depends_on:
+      - sidecar-webui

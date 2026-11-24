@@ -39,6 +39,20 @@ func Decide(tokens int, tokensOK bool, price float64) Verdict {
 	return RejectInsufficientTokens
 }
 
+// ResolveTokens applies the internal default budget. It only changes the
+// result when the X-Rajomon-Tokens header is ABSENT and a default (> 0) is
+// configured; a present-but-malformed header stays invalid (401), and a
+// sidecar with no default (the entry sidecar) stays strict.
+func ResolveTokens(headerPresent bool, tokens int, ok bool, defaultTokens int) (int, bool) {
+	if ok {
+		return tokens, true
+	}
+	if !headerPresent && defaultTokens > 0 {
+		return defaultTokens, true
+	}
+	return tokens, false
+}
+
 // AdmissionCost converts the local floating-point price to the integer token
 // charge used for both the admission check and deduction.
 func AdmissionCost(price float64) int {

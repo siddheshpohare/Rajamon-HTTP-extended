@@ -1,0 +1,33 @@
+# ============================================================
+# Prometheus Configuration — Rajomon-HTTP (TeaStore benchmark)
+#
+# Scrapes /metrics from all 5 TeaStore sidecars every 5s.
+# Sidecars are reachable by their sidecar-<name> container name
+# on the rajomon-http_default Docker network.
+#
+# service_name label comes from each sidecar's ConstLabels set
+# in sidecar/metrics.go — drives all Grafana dashboard panels.
+# ============================================================
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+
+  # ── Prometheus self-monitoring ──────────────────────────────
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ── Rajomon sidecars (one per TeaStore business-logic service)
+  # Ports 9550–9554 map to: webui, auth, imageprovider, recommender, persistence
+  - job_name: rajomon_sidecars
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - sidecar-webui:9550
+          - sidecar-auth:9551
+          - sidecar-imageprovider:9552
+          - sidecar-recommender:9553
+          - sidecar-persistence:9554

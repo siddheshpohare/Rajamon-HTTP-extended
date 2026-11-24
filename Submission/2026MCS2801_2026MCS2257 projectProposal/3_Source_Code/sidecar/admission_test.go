@@ -1,0 +1,237 @@
+package main
+
+import "testing"
+
+// TestDecide covers every row of the Decision Table.
+// The admission logic itself is unchanged — only the congestion signal
+// (queue depth vs. in-flight) that feeds into price has changed.
+func TestDecide(t *testing.T) {
+	tests := []struct {
+		name     string
+		tokens   int
+		tokensOK bool
+		price    float64
+		want     Verdict
+	}{
+		// Row 1: No header → strict reject (401, upstream never touched)
+		{
+			name:     "no token header → RejectMissingTokens",
+			tokens:   0,
+			tokensOK: false,
+			price:    1.0,
+			want:     RejectMissingTokens,
+		},
+		// Row 2: tokens present, tokens >= price → Forward
+		{
+			name:     "tokens exactly equal to price → Forward",
+			tokens:   5,
+			tokensOK: true,
+			price:    5.0,
+			want:     Forward,
+		},
+		{
+			name:     "tokens greater than price → Forward",
+			tokens:   100,
+			tokensOK: true,
+			price:    1.5,
+			want:     Forward,
+		},
+		// Row 3: tokens present, tokens < price → Reject
+		{
+			name:     "tokens less than price → RejectInsufficientTokens",
+			tokens:   0,
+			tokensOK: true,
+			price:    1.0,
+			want:     RejectInsufficientTokens,
+		},
+		{
+			name:     "tokens much less than price → RejectInsufficientTokens",
+			tokens:   3,
+			tokensOK: true,
+			price:    10.0,
+			want:     RejectInsufficientTokens,
+		},
+		// Edge: still rejected as missing even when the token value happens to be 0
+		{
+			name:     "missing header with zero-value token → RejectMissingTokens",
+			tokens:   0,
+			tokensOK: false,
+			price:    0.0,
+			want:     RejectMissingTokens,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Decide(tt.tokens, tt.tokensOK, tt.price)
+			if got != tt.want {
+				t.Errorf("Decide(%d, %v, %v) = %v, want %v",
+					tt.tokens, tt.tokensOK, tt.price, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGetLocalPrice verifies that GetLocalPrice uses queued plus in-flight
+// requests as its congestion signal.
+func TestGetLocalPrice(t *testing.T) {
+	cfg := SidecarConfig{
+		BasePrice:        1.0,
+		PriceScaleFactor: 0.5,
+	}
+
+	tests := []struct {
+		name      string
+		queued    int64
+		inFlight  int64
+		wantPrice float64
+	}{
+		{
+			name:      "zero queue, zero in-flight → base price only",
+			queued:    0,
+			inFlight:  0,
+			wantPrice: 1.0,
+		},
+		{
+			name:      "queue=2, in-flight=0 → price driven by queue",
+			queued:    2,
+			inFlight:  0,
+			wantPrice: 2.0, // 1.0 + 0.5*2
+		},
+		{
+			name:      "queue=0, in-flight=10 → price driven by in-flight",
+			queued:    0,
+			inFlight:  10,
+			wantPrice: 6.0, // 1.0 + 0.5*10
+		},
+		{
+			name:      "queue=10, in-flight=3 → price driven by queue + in-flight",
+			queued:    10,
+			inFlight:  3,
+			wantPrice: 7.5, // 1.0 + 0.5*(10+3)
+		},
+		{
+			name:      "negative queued (transient underflow) → clamped to base price",
+			queued:    -2,
+			inFlight:  0,
+			wantPrice: 1.0, // underflow guard: queued clamped to 0
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Metrics{
+				Queued:   tt.queued,
+				InFlight: tt.inFlight,
+			}
+			got := GetLocalPrice(cfg, m)
+			if got != tt.wantPrice {
+				t.Errorf("GetLocalPrice() = %.2f, want %.2f (queued=%d, in_flight=%d)",
+					got, tt.wantPrice, tt.queued, tt.inFlight)
+			}
+		})
+	}
+}
+
+func TestAdmissionCost(t *testing.T) {
+	tests := []struct {
+		price float64
+		want  int
+	}{
+		{price: 0, want: 0},
+		{price: 1, want: 1},
+		{price: 1.01, want: 2},
+		{price: 1.5, want: 2},
+		{price: 2, want: 2},
+	}
+
+	for _, tt := range tests {
+		if got := AdmissionCost(tt.price); got != tt.want {
+			t.Errorf("AdmissionCost(%.2f) = %d, want %d", tt.price, got, tt.want)
+		}
+	}
+}
+
+func TestFractionalPriceRequiresCeilingTokenCost(t *testing.T) {
+	if got := Decide(1, true, 1.5); got != RejectInsufficientTokens {
+		t.Errorf("Decide(1, true, 1.5) = %v, want RejectInsufficientTokens", got)
+	}
+	if got := Decide(2, true, 1.5); got != Forward {
+		t.Errorf("Decide(2, true, 1.5) = %v, want Forward", got)
+	}
+}
+
+// TestMetricsLifecycle verifies the counter transitions across the full
+// request lifecycle for each verdict path.
+func TestMetricsLifecycle(t *testing.T) {
+	t.Run("forward path: enqueue → dequeue → complete", func(t *testing.T) {
+		m := &Metrics{}
+		m.EnqueueRequest()
+		if m.Queued != 1 || m.InFlight != 0 {
+			t.Errorf("after EnqueueRequest: Queued=%d InFlight=%d, want 1,0", m.Queued, m.InFlight)
+		}
+		m.DequeueRequest()
+		if m.Queued != 0 || m.InFlight != 1 {
+			t.Errorf("after DequeueRequest: Queued=%d InFlight=%d, want 0,1", m.Queued, m.InFlight)
+		}
+		m.CompleteRequest()
+		if m.Queued != 0 || m.InFlight != 0 {
+			t.Errorf("after CompleteRequest: Queued=%d InFlight=%d, want 0,0", m.Queued, m.InFlight)
+		}
+	})
+
+	t.Run("reject path: enqueue → cancel (never in-flight)", func(t *testing.T) {
+		m := &Metrics{}
+		m.EnqueueRequest()
+		if m.Queued != 1 {
+			t.Errorf("after EnqueueRequest: Queued=%d, want 1", m.Queued)
+		}
+		m.CancelRequest()
+		if m.Queued != 0 || m.InFlight != 0 {
+			t.Errorf("after CancelRequest: Queued=%d InFlight=%d, want 0,0", m.Queued, m.InFlight)
+		}
+	})
+
+	t.Run("concurrent requests accumulate in queue", func(t *testing.T) {
+		m := &Metrics{}
+		for i := 0; i < 5; i++ {
+			m.EnqueueRequest()
+		}
+		if m.Queued != 5 {
+			t.Errorf("Queued=%d after 5 enqueues, want 5", m.Queued)
+		}
+		// Two admitted, three still queued
+		m.DequeueRequest()
+		m.DequeueRequest()
+		if m.Queued != 3 || m.InFlight != 2 {
+			t.Errorf("Queued=%d InFlight=%d, want 3,2", m.Queued, m.InFlight)
+		}
+	})
+}
+
+// TestResolveTokens covers the internal default budget used by the four
+// non-entry sidecars (TeaStore does not forward X-Rajomon-Tokens).
+func TestResolveTokens(t *testing.T) {
+	tests := []struct {
+		name          string
+		headerPresent bool
+		tokens        int
+		ok            bool
+		def           int
+		wantTokens    int
+		wantOK        bool
+	}{
+		{"valid header is untouched", true, 7, true, 20, 7, true},
+		{"absent header, default 20 -> 20", false, 0, false, 20, 20, true},
+		{"absent header, no default (entry sidecar) -> stays invalid", false, 0, false, 0, 0, false},
+		{"malformed header is never defaulted", true, 0, false, 20, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotT, gotOK := ResolveTokens(tt.headerPresent, tt.tokens, tt.ok, tt.def)
+			if gotT != tt.wantTokens || gotOK != tt.wantOK {
+				t.Errorf("ResolveTokens() = (%d,%v), want (%d,%v)", gotT, gotOK, tt.wantTokens, tt.wantOK)
+			}
+		})
+	}
+}

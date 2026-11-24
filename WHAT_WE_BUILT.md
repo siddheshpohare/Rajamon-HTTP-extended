@@ -22,7 +22,7 @@ price = base_price + scale_factor × (queued + in_flight)
 cost  = ceil(price)
 ```
 
-At 200 concurrent connections with `tokens=50`, the price immediately exceeds 50 — causing 100% of requests to be shed at the sidecar before the upstream is ever touched.
+At 200 concurrent connections with `tokens=50`, the price immediately exceeds 50 — causing ~99.9% of requests to be shed at the sidecar before the upstream is ever touched.
 
 ```
 Client → [Sidecar / Traffic Cop] → Upstream Service
@@ -102,7 +102,7 @@ The sidecar makes a decision on every request:
 | `sidecar/headers.go` | `ReadTokenHeader` / `WriteTokenHeader` / `WritePriceHeader` |
 | `sidecar/pricing.go` | Atomic `Queued` + `InFlight` counters; `GetLocalPrice()` |
 | `sidecar/admission.go` | `Decide()` + `AdmissionCost()` using `math.Ceil` |
-| `sidecar/admission_test.go` | 16 sub-tests covering all decision paths |
+| `sidecar/admission_test.go` | 16 test cases (14 sub-tests + 2 standalone) covering all decision paths |
 | `sidecar/config.go` | Added `RAJOMON_BASE_PRICE`, `RAJOMON_PRICE_SCALE_FACTOR` |
 
 ### Three policy changes (final, implemented Nov 2026)
@@ -130,7 +130,7 @@ curl -si -H "X-Rajomon-Tokens: 1" http://localhost:9550/tools.descartes.teastore
 
 # Unit tests (golang:1.26)
 docker run --rm -v "D:\Rajamon-HTTP\sidecar:/src" -w /src golang:1.26 sh -c "go test ./... -v"
-# Expected: ok rajomon-http/sidecar 0.029s — all 16 sub-tests PASS
+# Expected: ok rajomon-http/sidecar 0.029s — all 16 test cases PASS
 ```
 
 ---
@@ -138,16 +138,14 @@ docker run --rm -v "D:\Rajamon-HTTP\sidecar:/src" -w /src golang:1.26 sh -c "go 
 ## Phase 4 — Fleet Rollout + Prometheus + Grafana
 
 ### What it is
-Sidecars deployed in front of **all 5 TeaStore services**, with Prometheus scraping every sidecar and Grafana showing a live fleet dashboard.
+Sidecars deployed in front of **all 5 TeaStore services**, with Prometheus scraping every sidecar and Grafana showing a live fleet dashboard. Measured traffic is at the entry sidecar (`sidecar-webui`); internal TeaStore calls bypass the other sidecars (see below).
 
 ```
 [5 Sidecars] ←scrape every 5s— [Prometheus :9090] ←reads— [Grafana :3000]
 ```
 
-### Network alias trick (zero-touch interception)
-Real service containers run as `teastore-<name>-upstream` (hidden).  
-Sidecars claim the `teastore-<name>` Docker network alias (public).  
-When `teastore-webui` calls `teastore-auth` by name, Docker DNS resolves to `sidecar-auth` — admission runs automatically with no application code changes.
+### Network aliases (and a known limitation)
+Real service containers run as `teastore-<name>-upstream`; each sidecar also holds the `teastore-<name>` alias. However, TeaStore services discover peers through the TeaStore registry using the `HOST_NAME` they register (`teastore-<name>-upstream:8080`), so internal peer calls go straight to the real containers and **bypass the sidecars**. Admission is enforced and measured at the entry sidecar (`sidecar-webui`, :9550); sidecars 9551-9554 only see traffic sent to them directly. Intercepting internal hops needs the registry to advertise the sidecars and the app to forward `X-Rajomon-Tokens` — future work. No application code was changed.
 
 ### Files
 | File | What it does |
@@ -211,7 +209,8 @@ curl -si -H "X-Rajomon-Tokens: 100" http://localhost:10000/tools.descartes.teast
 **Spike result — 200 conn, tokens=50, 30 s:**
 
 ```
-514,442 total requests  |  101 forwarded  |  514,536 rejected (100%)
+wrk: 514,442 requests completed  |  sidecar counters: 101 forwarded, 514,536 rejected (99.98%)
+(sidecar and wrk count slightly different windows; wrk also logged 96 timeouts)
 17,117 req/s  |  avg latency 37.78 ms  |  queued=0, in_flight=0 after test
 ```
 

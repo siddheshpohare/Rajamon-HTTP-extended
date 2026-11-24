@@ -5,11 +5,11 @@
 # Simulates a real, restrictively-configured production gateway.
 #
 # Expected header-survival-check result:
-#   FAIL (header stripped) — but the request still completes via fail-open,
-#   proving the mechanism degrades safely rather than catastrophically.
+#   FAIL (header stripped) — the strict policy rejects the request with 401,
+#   so a stripped header fails loudly instead of silently bypassing admission.
 #
 # Flow: Client → Envoy :10000 → [strips headers] → sidecar-webui :9550
-#       sidecar sees no token header → ForwardFailOpen → teastore-webui-upstream
+#       sidecar sees no token header → RejectMissingTokens (401), upstream untouched
 ################################################################################
 
 static_resources:

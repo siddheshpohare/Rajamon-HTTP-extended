@@ -25,7 +25,7 @@ price = base_price + scale_factor × (queued + in_flight)
 cost  = ceil(price)
 ```
 
-Under a 200-connection spike with `tokens=50`, the price exceeds 50 within milliseconds — 514,536 requests were shed at the sidecar at 17K req/s before the upstream was ever touched.
+Under a 200-connection spike with `tokens=50`, the price exceeds 50 within milliseconds — ~514K requests were shed at the sidecar at ~17K req/s (99.98%; only 101 were forwarded) before the upstream was touched for any of them.
 
 ---
 
@@ -63,9 +63,9 @@ DeathStarBench's Social Network services communicate internally via **Apache Thr
   ┌──────────────────────────┐
   │  teastore-webui  :8080   │  (Java Spring Boot, unmodified)
   └─────┬──────┬──────┬──────┘
-        │      │      │  X-Rajomon-Tokens: 98 propagated
+        │      │      │  internal calls: resolved via TeaStore registry (direct, bypass sidecars)
         ▼      ▼      ▼
-  sidecar-auth  sidecar-imageprovider  sidecar-recommender  sidecar-persistence
+  [sidecar-auth/-imageprovider/-recommender/-persistence deployed; see limitation below]
         │
         ▼
   teastore-db (MariaDB)
@@ -79,11 +79,11 @@ DeathStarBench's Social Network services communicate internally via **Apache Thr
   └──────────────────┘     └────────────────────┘
 ```
 
-### Network alias trick (zero application code changes)
+### Network aliases and what is (and is not) intercepted
 
-Real containers run as `teastore-<name>-upstream` (hidden).  
-Sidecars claim `teastore-<name>` as a Docker network alias.  
-When `teastore-webui` calls `teastore-auth`, Docker DNS resolves to `sidecar-auth` — admission runs automatically.
+Real containers run as `teastore-<name>-upstream`. Sidecars also hold the `teastore-<name>` DNS alias, but TeaStore services discover each other through the **TeaStore registry** using the `HOST_NAME` each registers (`teastore-<name>-upstream:8080`). Internal peer calls therefore go straight to the real containers and **bypass the sidecars**.
+
+Admission is enforced and measured at the **entry sidecar** (`sidecar-webui`, port 9550). The other four sidecars are deployed and healthy but only see traffic sent to them directly (ports 9551-9554). Intercepting internal hops needs the registry to advertise the sidecars **and** the application to forward `X-Rajomon-Tokens` (otherwise strict admission returns 401) — future work. The WebUI is also published on host `:8080` for baseline runs. No application code was changed.
 
 ---
 
@@ -138,7 +138,7 @@ Rajamon-HTTP/
 | 2 | Sidecar Skeleton | ✅ Done | Transparent Go reverse proxy |
 | 3 | Admission Engine | ✅ Done | Token/price decision logic, strict policy |
 | 4 | Fleet Rollout & Metrics | ✅ Done | 5 sidecars + Prometheus + Grafana |
-| 5 | Gateway & Header-Survival Test | ✅ Done | Envoy permissive/hardened + header tests |
+| 5 | Gateway & Header-Survival Test | ✅ Done | Envoy permissive/hardened + header tests (Oct 14 run predates the strict-401 and ceil() changes) |
 | 6 | Evaluation Harness & Load Tests | ✅ Done | Full load suite, price-under-load confirmed |
 | 7 | End-to-End Verification | ✅ **COMPLETE** | All checks pass, report signed off |
 
@@ -201,7 +201,7 @@ curl -si -H "X-Rajomon-Tokens: 100" http://localhost:10000/tools.descartes.teast
 ```bash
 # No local Go needed — runs in a disposable container
 docker run --rm -v "${PWD}/sidecar:/src" -w /src golang:1.26 sh -c "go test ./... -v"
-# Expected: ok  rajomon-http/sidecar  0.029s  — all 16 sub-tests PASS
+# Expected: ok  rajomon-http/sidecar  0.029s  — all 16 test cases PASS (14 sub-tests + 2 standalone)
 ```
 
 ---
@@ -217,7 +217,7 @@ docker run --rm --network host williamyeh/wrk \
   -t8 -c200 -d30s \
   -H "X-Rajomon-Tokens: 50" \
   http://localhost:9550/tools.descartes.teastore.webui/
-# Expected: ~100% Non-2xx (503) — price exceeds 50-token budget immediately
+# Expected: ~99.9% Non-2xx (503) — price exceeds 50-token budget within milliseconds
 
 # Fast rejection path: tokens=1 (below ceil(1.5)=2)
 docker run --rm --network host williamyeh/wrk \

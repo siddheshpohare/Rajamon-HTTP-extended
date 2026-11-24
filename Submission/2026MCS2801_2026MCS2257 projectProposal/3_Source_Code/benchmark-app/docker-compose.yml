@@ -1,0 +1,130 @@
+# ============================================================
+# TeaStore Benchmark — Docker Compose
+#
+# Official TeaStore microservice benchmark application.
+# All services communicate via pure REST/HTTP — compatible
+# with the Rajomon-HTTP HTTP reverse-proxy sidecar.
+#
+# Services:
+#   teastore-registry     — Service registry (Eureka-style)
+#   teastore-db           — MariaDB persistence backend
+#   teastore-webui        — Web UI / entry point (:8080)
+#   teastore-auth         — Authentication service (:8080)
+#   teastore-imageprovider— Image provider (:8080)
+#   teastore-recommender  — Recommender (:8080)
+#   teastore-persistence  — Persistence layer (:8080)
+#
+# NOTE: The real service containers are named teastore-*-upstream. Auth,
+#       ImageProvider, Recommender and Persistence register themselves in the
+#       TeaStore registry as their SIDECAR (HOST_NAME=teastore-<name>,
+#       SERVICE_PORT=955x), so peers call the sidecar, which forwards to the
+#       real container on :8080. The WebUI is the entry point (sidecar-webui
+#       :9550) and is also published on host :8080 for baseline runs.
+#       In standalone mode (no sidecars), set HOST_NAME back to the real
+#       service name and drop SERVICE_PORT.
+# ============================================================
+
+services:
+
+  # ── Service Registry ─────────────────────────────────────
+  # All TeaStore services register here and discover peers.
+  # No sidecar needed — this is infrastructure plumbing, not
+  # a business-logic service with HTTP load we want to control.
+  teastore-registry:
+    image: descartesresearch/teastore-registry:latest
+    hostname: teastore-registry
+    restart: "no"
+    ports:
+      - "8083:8080"     # Host 8083 → registry HTTP API (avoids conflict with webui :8080)
+
+  # ── Database ─────────────────────────────────────────────
+  # MariaDB — speaks MySQL binary protocol, not HTTP.
+  # No sidecar needed or possible for a database.
+  teastore-db:
+    image: descartesresearch/teastore-db:latest
+    hostname: teastore-db
+    restart: "no"
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: teastore
+
+  # ── Web UI ───────────────────────────────────────────────
+  # Entry-point service. In sidecar mode, traffic arrives at
+  # sidecar-webui:9550 which forwards here.
+  # Hostname is teastore-webui-upstream so the sidecar can
+  # claim the teastore-webui alias (see root docker-compose.yml).
+  teastore-webui-upstream:
+    image: descartesresearch/teastore-webui:latest
+    hostname: teastore-webui-upstream
+    restart: "no"
+    ports:
+      - "8080:8080"     # Host :8080 — direct access / baseline mode
+    environment:
+      HOST_NAME: "teastore-webui-upstream"
+      REGISTRY_HOST: "teastore-registry"
+      REGISTRY_PORT: "8080"
+      USE_RECOMMENDATION_IMAGES: "false"
+    depends_on:
+      - teastore-registry
+
+  # ── Auth Service ─────────────────────────────────────────
+  teastore-auth-upstream:
+    image: descartesresearch/teastore-auth:latest
+    hostname: teastore-auth-upstream
+    restart: "no"
+    environment:
+      HOST_NAME: "teastore-auth"
+      SERVICE_PORT: "9551"
+      REGISTRY_HOST: "teastore-registry"
+      REGISTRY_PORT: "8080"
+    depends_on:
+      - teastore-registry
+      - teastore-db
+
+  # ── Image Provider ───────────────────────────────────────
+  teastore-imageprovider-upstream:
+    image: descartesresearch/teastore-image:latest
+    hostname: teastore-imageprovider-upstream
+    restart: "no"
+    environment:
+      HOST_NAME: "teastore-imageprovider"
+      SERVICE_PORT: "9552"
+      REGISTRY_HOST: "teastore-registry"
+      REGISTRY_PORT: "8080"
+      PRELOAD_IMAGES: "false"
+    depends_on:
+      - teastore-registry
+
+  # ── Recommender ──────────────────────────────────────────
+  teastore-recommender-upstream:
+    image: descartesresearch/teastore-recommender:latest
+    hostname: teastore-recommender-upstream
+    restart: "no"
+    environment:
+      HOST_NAME: "teastore-recommender"
+      SERVICE_PORT: "9553"
+      REGISTRY_HOST: "teastore-registry"
+      REGISTRY_PORT: "8080"
+    depends_on:
+      - teastore-registry
+      - teastore-db
+
+  # ── Persistence ──────────────────────────────────────────
+  # Database abstraction layer — all services go through here
+  # to reach teastore-db. This is the most contention-prone
+  # service under load — ideal for admission control testing.
+  teastore-persistence-upstream:
+    image: descartesresearch/teastore-persistence:latest
+    hostname: teastore-persistence-upstream
+    restart: "no"
+    environment:
+      HOST_NAME: "teastore-persistence"
+      SERVICE_PORT: "9554"
+      REGISTRY_HOST: "teastore-registry"
+      REGISTRY_PORT: "8080"
+      DB_HOST: "teastore-db"
+      DB_PORT: "3306"
+    depends_on:
+      - teastore-registry
+      - teastore-db

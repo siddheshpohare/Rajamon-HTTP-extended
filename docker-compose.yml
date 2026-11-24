@@ -8,16 +8,29 @@
 #
 # Architecture:
 #   Client → Envoy Gateway (:10000)
-#          → sidecar-webui (:9550)       ← admission + proxy
+#          → sidecar-webui (:9550)       ← entry hop: strict admission
 #          → teastore-webui-upstream:8080 ← real app (unmodified)
-#          → sidecar-auth / sidecar-recommender / etc. (via DNS alias)
-#          → teastore-*-upstream:8080
+#   WebUI → registry lookup → teastore-<name>:<955x> = the sidecar
+#          → sidecar-auth/-imageprovider/-recommender/-persistence
+#          → teastore-<name>-upstream:8080 (real service, unmodified)
 #
-# Network alias trick:
-#   Real services run as teastore-<name>-upstream (hidden name).
-#   Sidecars take the teastore-<name> alias (public DNS name).
-#   All inter-service REST calls automatically hit sidecars first.
-#   Zero application code changes required.
+# How internal calls reach the sidecars (configuration only, no TeaStore code):
+#   TeaStore services register HOST_NAME:SERVICE_PORT with the registry and peers
+#   call whatever is registered. benchmark-app/docker-compose.yml registers each
+#   internal service as its SIDECAR (teastore-<name>:955x). The real containers
+#   are named teastore-<name>-upstream so the plain name belongs only to the
+#   sidecar's network alias.
+#
+# Budget on internal hops:
+#   TeaStore does not copy X-Rajomon-Tokens onto its own outgoing calls, so
+#   internal sidecars set RAJOMON_INTERNAL_DEFAULT_TOKENS (default 20) as the
+#   budget for header-less calls. The entry sidecar leaves it unset and keeps
+#   strict 401. A malformed header is always rejected. Budgets are therefore
+#   per-service, not one shrinking end-to-end budget (future work: propagate it,
+#   e.g. via OpenTelemetry baggage). Only trusted-network callers should be able
+#   to reach ports 9551-9554 directly.
+#
+# The WebUI is also published on host :8080 for baseline runs.
 #
 # Profiles:
 #   (default)          — benchmark + sidecars + monitoring
@@ -53,8 +66,7 @@ services:
   # ══════════════════════════════════════════════════════════
 
   # ── Web UI sidecar ───────────────────────────────────────
-  # Entry-point sidecar. Envoy forwards here. WebUI calls
-  # downstream services which resolve to their sidecars via aliases.
+  # Entry-point sidecar. Envoy forwards here. Strict: no header -> 401.
   sidecar-webui:
     <<: *sidecar-defaults
     environment:
@@ -67,9 +79,9 @@ services:
     networks:
       default:
         aliases:
-          - teastore-webui    # ← WebUI is discovered under this name by the registry
+          - teastore-webui    # ← DNS alias; WebUI itself still registers as teastore-webui-upstream
     depends_on:
-      - teastore-webui
+      - teastore-webui-upstream
 
   # ── Auth sidecar ─────────────────────────────────────────
   sidecar-auth:
@@ -77,6 +89,7 @@ services:
     environment:
       <<: *sidecar-env
       RAJOMON_SERVICE_NAME: auth
+      RAJOMON_INTERNAL_DEFAULT_TOKENS: "${RAJOMON_INTERNAL_DEFAULT_TOKENS:-20}"
       RAJOMON_LISTEN_ADDR: ":9551"
       RAJOMON_UPSTREAM_ADDR: "teastore-auth-upstream:8080"
     ports:
@@ -86,7 +99,7 @@ services:
         aliases:
           - teastore-auth
     depends_on:
-      - teastore-auth
+      - teastore-auth-upstream
 
   # ── Image Provider sidecar ───────────────────────────────
   sidecar-imageprovider:
@@ -94,6 +107,7 @@ services:
     environment:
       <<: *sidecar-env
       RAJOMON_SERVICE_NAME: imageprovider
+      RAJOMON_INTERNAL_DEFAULT_TOKENS: "${RAJOMON_INTERNAL_DEFAULT_TOKENS:-20}"
       RAJOMON_LISTEN_ADDR: ":9552"
       RAJOMON_UPSTREAM_ADDR: "teastore-imageprovider-upstream:8080"
     ports:
@@ -103,7 +117,7 @@ services:
         aliases:
           - teastore-imageprovider
     depends_on:
-      - teastore-imageprovider
+      - teastore-imageprovider-upstream
 
   # ── Recommender sidecar ──────────────────────────────────
   sidecar-recommender:
@@ -111,6 +125,7 @@ services:
     environment:
       <<: *sidecar-env
       RAJOMON_SERVICE_NAME: recommender
+      RAJOMON_INTERNAL_DEFAULT_TOKENS: "${RAJOMON_INTERNAL_DEFAULT_TOKENS:-20}"
       RAJOMON_LISTEN_ADDR: ":9553"
       RAJOMON_UPSTREAM_ADDR: "teastore-recommender-upstream:8080"
     ports:
@@ -120,16 +135,18 @@ services:
         aliases:
           - teastore-recommender
     depends_on:
-      - teastore-recommender
+      - teastore-recommender-upstream
 
   # ── Persistence sidecar ──────────────────────────────────
-  # Most contention-prone service — persistence handles all DB
-  # reads/writes. Expected to show highest price under load spikes.
+  # Persistence handles all DB reads/writes. Registered in the TeaStore
+  # registry as teastore-persistence:9554, so every internal caller goes
+  # through this sidecar.
   sidecar-persistence:
     <<: *sidecar-defaults
     environment:
       <<: *sidecar-env
       RAJOMON_SERVICE_NAME: persistence
+      RAJOMON_INTERNAL_DEFAULT_TOKENS: "${RAJOMON_INTERNAL_DEFAULT_TOKENS:-20}"
       RAJOMON_LISTEN_ADDR: ":9554"
       RAJOMON_UPSTREAM_ADDR: "teastore-persistence-upstream:8080"
     ports:
@@ -139,7 +156,7 @@ services:
         aliases:
           - teastore-persistence
     depends_on:
-      - teastore-persistence
+      - teastore-persistence-upstream
 
   # ══════════════════════════════════════════════════════════
   # Observability stack — Prometheus + Grafana

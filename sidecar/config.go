@@ -23,6 +23,15 @@ type SidecarConfig struct {
 	// PriceScaleFactor controls how steeply price rises per in-flight request.
 	// Sourced from RAJOMON_PRICE_SCALE_FACTOR; default 0.5.
 	PriceScaleFactor float64
+
+	// InternalDefaultTokens is the token budget assumed for requests that arrive
+	// WITHOUT an X-Rajomon-Tokens header. TeaStore does not forward the header on
+	// its internal calls, so the internal sidecars (auth, imageprovider,
+	// recommender, persistence) set this (e.g. 20); the entry sidecar leaves it
+	// at 0, which keeps strict 401 for missing headers. A header that is present
+	// but malformed is always rejected. Sourced from
+	// RAJOMON_INTERNAL_DEFAULT_TOKENS; default 0 (strict).
+	InternalDefaultTokens int
 }
 
 // LoadConfigFromEnv reads all required and optional env vars.
@@ -52,6 +61,7 @@ func LoadConfigFromEnv() SidecarConfig {
 	// ── Phase 3: pricing parameters (optional, with safe defaults) ───────────
 	cfg.BasePrice = parseFloatEnv("RAJOMON_BASE_PRICE", 1.0)
 	cfg.PriceScaleFactor = parseFloatEnv("RAJOMON_PRICE_SCALE_FACTOR", 0.5)
+	cfg.InternalDefaultTokens = int(parseFloatEnv("RAJOMON_INTERNAL_DEFAULT_TOKENS", 0))
 
 	return cfg
 }
